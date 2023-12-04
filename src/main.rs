@@ -2,26 +2,23 @@ mod numa;
 mod race;
 mod cfg;
 
-use numa::numa::Numa;
+use race::race_type::Directories;
+use numa::mm::MemoryManager;
+use std::sync::{Arc, Mutex};
 
 fn main() {
-    unsafe {
-        // alloc a array on node 0 by numa_alloc_onnode
-        let ptr = Numa::numa_alloc_onnode(10, 0);
-        if ptr.is_null() {
-            println!("alloc failed");
-        } else {
-            println!("alloc success");
-        }
-        // assign value to array
-        for i in 0..4096 {
-            *ptr.offset(i as isize) = (i % 128) as u8;
-        }
-        // print the value
-        for i in 0..4096 {
-            assert_eq!(*ptr.offset(i as isize), (i % 128) as u8);
-        }
-        // free the array
-        Numa::numa_free(ptr, 10);
-    }
+    let memory_manager = Arc::new(Mutex::new(MemoryManager::new()));
+    let mut directories = Directories::new();
+
+    directories.add_directory(memory_manager.clone());
+
+    directories.add_directory(memory_manager.clone());
+
+    // directories.deref_directories();
+
+    directories.get(0).get_subtable().bucket_groups[0].buckets[0].slots[0].set_length(10);
+
+    print!("{}", directories.get(0).get_subtable().bucket_groups[0].buckets[0].slots[0].get_length());
+
+    // print!("{}", directories.get(0).get_subtable().bucket_groups[0].buckets[0].header.data);
 }

@@ -24,15 +24,17 @@ impl MemoryManager {
         let ptr = Numa::numa_alloc_onnode(4096, 0);
     }
 
-    pub fn malloc(&mut self, size: usize) -> *mut u64 {
+    pub fn malloc(&mut self, size: usize) -> *mut u8 {
+        if size > 4096 {
+            return std::ptr::null_mut();
+        }
         let ptr = Numa::numa_alloc_onnode(size, 0);
         for i in 0..size {
             unsafe {
-                *ptr.offset(i as isize) = 0;
+                (*ptr.offset(i as isize)) = 0;
             }
         }
-        ptr as *mut u64
+        print!("malloc {}: {:p}\n", size, ptr);
+        ptr as *mut u8
     }
 }
-
-pub static MEMORY_MANAGER: Arc<Mutex<MemoryManager>> = Arc::new(Mutex::new(MemoryManager::new()));

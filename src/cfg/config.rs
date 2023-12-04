@@ -1,4 +1,5 @@
 pub struct RaceConfig {
+    pub bits_of_byte: usize,
     pub bucket_group_num: usize,
     pub bucket_num: usize,
     pub slot_num: usize,
@@ -12,6 +13,7 @@ pub struct RaceConfig {
 }
 
 pub const CONFIG: RaceConfig = RaceConfig {
+    bits_of_byte: 8,
     bucket_group_num: 4,
     bucket_num: 3,
     slot_num: 7,

@@ -1,7 +1,7 @@
 #[link(name = "numa")]
 extern "C" {
     pub fn numa_available() -> i32;
-    pub fn numa_alloc_onnode(size: usize, node: i32) -> *mut u64;
+    pub fn numa_alloc_onnode(size: usize, node: i32) -> *mut u8;
     pub fn numa_free(ptr: *mut u8, size: usize);
 }
 
@@ -14,7 +14,7 @@ impl Numa {
         }
     }
 
-    pub fn numa_alloc_onnode(size: usize, node: i32) -> *mut u64 {
+    pub fn numa_alloc_onnode(size: usize, node: i32) -> *mut u8 {
         unsafe {
             numa_alloc_onnode(size, node)
         }
