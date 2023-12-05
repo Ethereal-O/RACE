@@ -13,18 +13,29 @@ use std::{
 use crate::numa::numa::numa_free;
 fn main() {
     let memory_manager = Arc::new(Mutex::new(MemoryManager::new()));
-    let key = String::from("sentence");
-    let value = String::from("Hello World!");
-    let kvbm = KVBlockMem::new(
-        key.len() as u16,
-        value.len() as u16,
-        key,
-        value,
-        memory_manager,
-    );
-    let kvb = unsafe { (*kvbm).get() };
-    println!("{:?}", kvb);
-    // let mut directories = Directories::new();
+    // let key = String::from("sentence");
+    // let value = String::from("Hello World!");
+    // let kvbm = KVBlockMem::new(
+    //     &key,
+    //     &value,
+    //     memory_manager,
+    // );
+    // let kvb = unsafe { (*kvbm).get() };
+    // println!("{:?}", kvb);
+    let mut directories = Directories::new(memory_manager.clone());
+
+    print!("{}\n", directories.get(0).get_local_depth());
+    print!("{}\n", directories.get(0).get_subtable().bucket_groups[0].buckets[0].header.get_local_depth());
+    print!("{}\n", directories.get(0).get_subtable().bucket_groups[0].buckets[0].header.get_suffix());
+
+    directories.rehash(memory_manager, 0);
+
+    print!("{}\n", directories.get(0).get_local_depth());
+    print!("{}\n", directories.get(1).get_local_depth());
+    print!("{}\n", directories.get(0).get_subtable().bucket_groups[0].buckets[0].header.get_local_depth());
+    print!("{}\n", directories.get(1).get_subtable().bucket_groups[0].buckets[0].header.get_local_depth());
+    print!("{}\n", directories.get(0).get_subtable().bucket_groups[0].buckets[0].header.get_suffix());
+    print!("{}\n", directories.get(1).get_subtable().bucket_groups[0].buckets[0].header.get_suffix());
 
     // directories.add_directory(memory_manager.clone());
 

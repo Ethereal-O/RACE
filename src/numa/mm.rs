@@ -29,9 +29,6 @@ impl MemoryManager {
     }
 
     pub fn malloc(&mut self, size: usize) -> *mut u8 {
-        if size > 4096 {
-            return std::ptr::null_mut();
-        }
         let ptr = Numa::numa_alloc_onnode(size, 0);
         for i in 0..size {
             unsafe {

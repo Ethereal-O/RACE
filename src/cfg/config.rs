@@ -4,6 +4,7 @@ pub struct RaceConfig {
     pub bucket_num: usize,
     pub slot_num: usize,
     pub ptr_size: usize,
+    pub fp_size: usize,
     pub slot_fp_offset: usize,
     pub slot_len_offset: usize,
     pub header_local_depth_offset: usize,
@@ -14,10 +15,11 @@ pub struct RaceConfig {
 
 pub const CONFIG: RaceConfig = RaceConfig {
     bits_of_byte: 8,
-    bucket_group_num: 4,
+    bucket_group_num: 1024,
     bucket_num: 3,
     slot_num: 7,
     ptr_size: 8,
+    fp_size: 1,
     slot_fp_offset: 0,
     slot_len_offset: 1,
     header_local_depth_offset: 0,
