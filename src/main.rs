@@ -11,6 +11,44 @@ use std::{
 };
 
 use crate::numa::numa::numa_free;
+
+fn print_dir_depth(directories: &mut Directories, dir_index: usize) {
+    print!(
+        "{} dir depth: {}\n",
+        dir_index,
+        directories.get(dir_index).get_local_depth()
+    );
+}
+
+fn print_slot_depth(directories: &mut Directories, dir_index: usize) {
+    print!(
+        "{} slot depth: {}\n",
+        dir_index,
+        directories.get(dir_index).get_subtable().bucket_groups[0].buckets[0]
+            .header
+            .get_local_depth()
+    );
+}
+
+fn print_slot_suffix(directories: &mut Directories, dir_index: usize) {
+    print!(
+        "{} slot suffix: {}\n",
+        dir_index,
+        directories.get(dir_index).get_subtable().bucket_groups[0].buckets[0]
+            .header
+            .get_suffix()
+    );
+}
+
+fn print_all(directories: &mut Directories) {
+    let dir_num = directories.sub_dirs.len();
+    for i in 0..dir_num {
+        print_dir_depth(directories, i);
+        print_slot_depth(directories, i);
+        print_slot_suffix(directories, i);
+    }
+}
+
 fn main() {
     let memory_manager = Arc::new(Mutex::new(MemoryManager::new()));
     // let key = String::from("sentence");
@@ -24,31 +62,32 @@ fn main() {
     // println!("{:?}", kvb);
     let mut directories = Directories::new(memory_manager.clone());
 
-    print!("{}\n", directories.get(0).get_local_depth());
-    print!("{}\n", directories.get(0).get_subtable().bucket_groups[0].buckets[0].header.get_local_depth());
-    print!("{}\n", directories.get(0).get_subtable().bucket_groups[0].buckets[0].header.get_suffix());
+    // init value
+    print_all(&mut directories);
 
-    directories.rehash(memory_manager, 0);
+    // rehash first subtable
+    directories.rehash(memory_manager.clone(), 0);
+    print_all(&mut directories);
 
-    print!("{}\n", directories.get(0).get_local_depth());
-    print!("{}\n", directories.get(1).get_local_depth());
-    print!("{}\n", directories.get(0).get_subtable().bucket_groups[0].buckets[0].header.get_local_depth());
-    print!("{}\n", directories.get(1).get_subtable().bucket_groups[0].buckets[0].header.get_local_depth());
-    print!("{}\n", directories.get(0).get_subtable().bucket_groups[0].buckets[0].header.get_suffix());
-    print!("{}\n", directories.get(1).get_subtable().bucket_groups[0].buckets[0].header.get_suffix());
+    // rehash first subtable
+    directories.rehash(memory_manager.clone(), 0);
+    print_all(&mut directories);
 
-    // directories.add_directory(memory_manager.clone());
+    // rehash second subtable
+    directories.rehash(memory_manager.clone(), 1);
+    print_all(&mut directories);
 
-    // directories.add_directory(memory_manager.clone());
+    // rehash third subtable
+    directories.rehash(memory_manager.clone(), 2);
+    print_all(&mut directories);
 
-    // // directories.deref_directories();
+    // rehash third subtable
+    directories.rehash(memory_manager.clone(), 2);
+    print_all(&mut directories);
 
-    // directories.get(0).get_subtable().bucket_groups[0].buckets[0].slots[0].set_length(10);
+    // rehash first subtable
+    directories.rehash(memory_manager.clone(), 0);
+    print_all(&mut directories);
 
-    // print!(
-    //     "{}",
-    //     directories.get(0).get_subtable().bucket_groups[0].buckets[0].slots[0].get_length()
-    // );
-
-    // // print!("{}", directories.get(0).get_subtable().bucket_groups[0].buckets[0].header.data);
+    // 0 1 2 3 4 1 6 3 0 1 10 3 4 1 6 3
 }

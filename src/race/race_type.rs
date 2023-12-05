@@ -489,28 +489,8 @@ impl Directories {
         memory_manager: Arc<Mutex<MemoryManager>>,
         need_index: usize,
     ) {
-        let old_size = self.sub_dirs.len();
-        for index in 0..old_size {
-            if index == need_index {
-                let new_index = Directories::get_new_suffix_from_old(
-                    index as u64,
-                    self.get(index).get_local_depth(),
-                ) as usize;
-                let old_depth = self.get(index).get_local_depth();
-                self.sub_dirs.push(Directory::new(
-                    memory_manager.clone(),
-                    old_depth + 1,
-                    new_index as u64,
-                ));
-                self.get(index)
-                    .set_header_and_localdepth(old_depth + 1, index as u64);
-                self.move_items(index, new_index);
-            } else {
-                let cloned_dir = self.get(index);
-                let new_dir = Directory::copy_from(memory_manager.clone(), cloned_dir);
-                self.sub_dirs.push(new_dir);
-            }
-        }
+        self.double_size(memory_manager.clone());
+        self.split_dir(memory_manager.clone(), need_index);
     }
 
     pub fn move_items(&mut self, old_index: usize, new_index: usize) {}
@@ -519,8 +499,8 @@ impl Directories {
         let mut index = suffix as usize;
         while index < self.sub_dirs.len() {
             if Directories::restrict_suffix_to(index as u64, local_depth) == suffix {
-                let old_pointer = self.get(index).get_subtable_pointer();
-                self.get(index).set_subtable_pointer(old_pointer);
+                let new_pointer = self.get(suffix as usize).get_subtable_pointer();
+                self.get(index).set_subtable_pointer(new_pointer);
                 self.get(index).set_local_depth(local_depth);
             }
             index += 1;
@@ -528,6 +508,7 @@ impl Directories {
     }
 
     pub fn split_dir(&mut self, memory_manager: Arc<Mutex<MemoryManager>>, old_index: usize) {
+        // get new index
         let new_index = Directories::get_new_suffix_from_old(
             old_index as u64,
             self.get(old_index).get_local_depth(),
@@ -537,23 +518,40 @@ impl Directories {
             panic!("new_index error");
         }
 
+        // get old depth from old index
         let old_depth = self.get(old_index).get_local_depth();
 
+        // create new subtable
         self.get(new_index)
             .new_subtable(memory_manager, old_depth + 1, new_index as u64);
+
+        // change old subtable's local depth and suffix
         self.get(old_index)
             .set_header_and_localdepth(old_depth + 1, old_index as u64);
+
+        //  change all subtables with old suffix to new subtable
+        self.change_dir_suffix_subtable(old_depth + 1, old_index as u64);
         self.change_dir_suffix_subtable(old_depth + 1, new_index as u64);
+
+        // move items from old subtable to new subtable
         self.move_items(old_index, new_index);
     }
 
     pub fn rehash(&mut self, memory_manager: Arc<Mutex<MemoryManager>>, rehash_index: usize) {
-        let old_size = self.sub_dirs.len();
-        if self.sub_dirs.len() < (rehash_index + 1) * 2 {
-            self.double_size_with_new(memory_manager.clone(), rehash_index);
-        } else {
-            self.split_dir(memory_manager.clone(), rehash_index);
+        let new_index = Directories::get_new_suffix_from_old(
+            rehash_index as u64,
+            self.get(rehash_index).get_local_depth(),
+        ) as usize;
+        if self.sub_dirs.len() <= new_index {
+            self.double_size(memory_manager.clone());
         }
+        // get real old index
+        let old_index = Directories::restrict_suffix_to(
+            rehash_index as u64,
+            self.get(rehash_index).get_local_depth(),
+        ) as usize;
+
+        self.split_dir(memory_manager.clone(), old_index);
     }
 
     pub fn deref_directories(&mut self) -> Vec<Directory> {
