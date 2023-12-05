@@ -2,6 +2,10 @@ use super::numa::Numa;
 use std::sync::{Arc, Mutex};
 struct WrapperU8Ptr(*mut u8);
 
+extern "C" {
+    pub fn memcpy(dst: *mut u8, src: *const u8, bytes: usize);
+}
+
 struct Page {
     ptr: WrapperU8Ptr,
     used_size: usize,

@@ -9,18 +9,20 @@ use std::{
     ops::Deref,
     sync::{Arc, Mutex},
 };
+
+use crate::numa::numa::numa_free;
 fn main() {
     let memory_manager = Arc::new(Mutex::new(MemoryManager::new()));
     let key = String::from("sentence");
     let value = String::from("Hello World!");
-    let kvbm = std::mem::ManuallyDrop::new(KVBlockMem::new(
+    let kvbm = KVBlockMem::new(
         key.len() as u16,
         value.len() as u16,
         key,
         value,
         memory_manager,
-    ));
-    let kvb = unsafe { (**(kvbm.deref())).get() };
+    );
+    let kvb = unsafe { (*kvbm).get() };
     println!("{:?}", kvb);
     // let mut directories = Directories::new();
 

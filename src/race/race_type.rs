@@ -1,8 +1,11 @@
+use crate::numa::mm::memcpy;
+
 use super::super::cfg::config::CONFIG;
 use super::super::numa::mm::MemoryManager;
 use crc::{Crc, CRC_64_REDIS};
 use std::mem::size_of;
 use std::sync::{Arc, Mutex};
+use std::time::Instant;
 
 pub struct Slot {
     pub data: u64,
@@ -267,13 +270,8 @@ impl KVBlockMem {
             (*(kvblock_pointer as *mut Self)).crc64 = checksum;
         }
         let kv_pointer = kvblock_pointer.wrapping_add(size_of::<KVBlockMem>());
-        let combined_iter = combined_string.as_bytes().iter();
         unsafe {
-            let mut i = 0;
-            for chr in combined_iter {
-                *(kv_pointer.wrapping_add(i)) = *chr;
-                i += 1;
-            }
+            memcpy(kv_pointer, combined_string.as_ptr(), combined_string.len());
         }
         kvblock_pointer as *const Self
     }
@@ -284,19 +282,25 @@ impl KVBlockMem {
         let checksum = self.crc64;
         let data_pointer = unsafe { std::mem::transmute::<&KVBlockMem, *mut u8>(self) }
             .wrapping_add(size_of::<KVBlockMem>());
-        let key = unsafe { String::from_raw_parts(data_pointer, kl as usize, kl as usize) };
+        let key = unsafe {
+            std::mem::ManuallyDrop::new(String::from_raw_parts(
+                data_pointer,
+                kl as usize,
+                kl as usize,
+            ))
+        };
         let value = unsafe {
-            String::from_raw_parts(
+            std::mem::ManuallyDrop::new(String::from_raw_parts(
                 data_pointer.wrapping_add(kl as usize),
                 vl as usize,
                 vl as usize,
-            )
+            ))
         };
         KVBlock {
             klen: kl,
             vlen: vl,
-            key,
-            value,
+            key: key.to_string(),
+            value: value.to_string(),
             crc64: checksum,
         }
     }
