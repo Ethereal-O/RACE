@@ -490,7 +490,12 @@ impl Directories {
         need_index: usize,
     ) {
         self.double_size(memory_manager.clone());
-        self.split_dir(memory_manager.clone(), need_index);
+        // get real old index
+        let old_index = Directories::restrict_suffix_to(
+            need_index as u64,
+            self.get(need_index).get_local_depth(),
+        ) as usize;
+        self.split_dir(memory_manager.clone(), old_index);
     }
 
     pub fn move_items(&mut self, old_index: usize, new_index: usize) {}
@@ -538,18 +543,19 @@ impl Directories {
     }
 
     pub fn rehash(&mut self, memory_manager: Arc<Mutex<MemoryManager>>, rehash_index: usize) {
-        let new_index = Directories::get_new_suffix_from_old(
-            rehash_index as u64,
-            self.get(rehash_index).get_local_depth(),
-        ) as usize;
-        if self.sub_dirs.len() <= new_index {
-            self.double_size(memory_manager.clone());
-        }
         // get real old index
         let old_index = Directories::restrict_suffix_to(
             rehash_index as u64,
             self.get(rehash_index).get_local_depth(),
         ) as usize;
+
+        let new_index = Directories::get_new_suffix_from_old(
+            old_index as u64,
+            self.get(old_index).get_local_depth(),
+        ) as usize;
+        if self.sub_dirs.len() <= new_index {
+            self.double_size(memory_manager.clone());
+        }
 
         self.split_dir(memory_manager.clone(), old_index);
     }
