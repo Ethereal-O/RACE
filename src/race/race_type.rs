@@ -141,6 +141,18 @@ impl Slot {
         unsafe { (*(kv_pointer as *mut KVBlockMem)).get() }
     }
 
+    pub fn get_by_key(&self, key: &String) -> Option<String> {
+        if self.get_length() == 0 {
+            return None;
+        }
+        let kv_pointer = self.get_kv_pointer();
+        let kv = unsafe { (*(kv_pointer as *mut KVBlockMem)).get() };
+        if kv.key == *key {
+            return Some(kv.value);
+        }
+        return None;
+    }
+
     pub fn judge_empty(&self) -> bool {
         self.get_length() == 0
     }
@@ -236,6 +248,16 @@ impl Bucket {
         true
     }
 
+    pub fn get_by_key(&self, key: &String) -> Option<String> {
+        for slot in self.slots.iter() {
+            let value = slot.get_by_key(key);
+            if value.is_some() {
+                return value;
+            }
+        }
+        None
+    }
+
     pub fn set_header(&mut self, local_depth: u8, suffix: u64) {
         self.header.set_local_depth(local_depth);
         self.header.set_suffix(suffix);
@@ -264,6 +286,19 @@ impl BucketGroup {
             try_add_result = self.buckets[1].add_slot(memory_manager.clone(), key, value);
         }
         try_add_result
+    }
+
+    pub fn get_by_key(&self, key: &String, method: u8) -> Option<String> {
+        let mut value = None;
+        match method {
+            1 => value = self.buckets[0].get_by_key(key),
+            2 => value = self.buckets[2].get_by_key(key),
+            _ => panic!("method error"),
+        }
+        if value.is_none() {
+            value = self.buckets[1].get_by_key(key);
+        }
+        value
     }
 
     pub fn set_header(&mut self, local_depth: u8, suffix: u64) {
@@ -300,6 +335,15 @@ impl Subtable {
             );
         }
         try_add_result
+    }
+
+    pub fn get_by_key(&self, key: &String) -> Option<String> {
+        let mut value = None;
+        value = self.bucket_groups[Hash::hash(key, 1) as usize].get_by_key(key, 1);
+        if value.is_none() {
+            value = self.bucket_groups[Hash::hash(key, 2) as usize].get_by_key(key, 2);
+        }
+        value
     }
 
     pub fn set_header(&mut self, local_depth: u8, suffix: u64) {
@@ -386,6 +430,10 @@ impl Directory {
         self.get_subtable().add_slot(memory_manager, key, value)
     }
 
+    pub fn get_by_key(&self, key: &String) -> Option<String> {
+        self.get_subtable().get_by_key(key)
+    }
+
     pub fn get_lock(&self) -> u8 {
         (self.data
             >> CONFIG.bits_of_byte
@@ -468,6 +516,10 @@ impl Directories {
         )
     }
 
+    pub fn get_subtable_index(&mut self, key: &String) -> usize {
+        ((self.sub_dirs.len() as u64 - 1) & Hash::hash(key, 1)) as usize
+    }
+
     pub fn new(memory_manager: Arc<Mutex<MemoryManager>>) -> Self {
         let mut sub_dirs = Vec::new();
         sub_dirs.push(Directory::new(memory_manager, 0, 0));
@@ -493,7 +545,7 @@ impl Directories {
         // get real old index
         let old_index = Directories::restrict_suffix_to(
             need_index as u64,
-            self.get(need_index).get_local_depth(),
+            self.get_subdir(need_index).get_local_depth(),
         ) as usize;
         self.split_dir(memory_manager.clone(), old_index);
     }
@@ -504,9 +556,9 @@ impl Directories {
         let mut index = suffix as usize;
         while index < self.sub_dirs.len() {
             if Directories::restrict_suffix_to(index as u64, local_depth) == suffix {
-                let new_pointer = self.get(suffix as usize).get_subtable_pointer();
-                self.get(index).set_subtable_pointer(new_pointer);
-                self.get(index).set_local_depth(local_depth);
+                let new_pointer = self.get_subdir(suffix as usize).get_subtable_pointer();
+                self.get_subdir(index).set_subtable_pointer(new_pointer);
+                self.get_subdir(index).set_local_depth(local_depth);
             }
             index += 1;
         }
@@ -516,7 +568,7 @@ impl Directories {
         // get new index
         let new_index = Directories::get_new_suffix_from_old(
             old_index as u64,
-            self.get(old_index).get_local_depth(),
+            self.get_subdir(old_index).get_local_depth(),
         ) as usize;
 
         if self.sub_dirs.len() <= new_index {
@@ -524,14 +576,14 @@ impl Directories {
         }
 
         // get old depth from old index
-        let old_depth = self.get(old_index).get_local_depth();
+        let old_depth = self.get_subdir(old_index).get_local_depth();
 
         // create new subtable
-        self.get(new_index)
+        self.get_subdir(new_index)
             .new_subtable(memory_manager, old_depth + 1, new_index as u64);
 
         // change old subtable's local depth and suffix
-        self.get(old_index)
+        self.get_subdir(old_index)
             .set_header_and_localdepth(old_depth + 1, old_index as u64);
 
         //  change all subtables with old suffix to new subtable
@@ -546,18 +598,35 @@ impl Directories {
         // get real old index
         let old_index = Directories::restrict_suffix_to(
             rehash_index as u64,
-            self.get(rehash_index).get_local_depth(),
+            self.get_subdir(rehash_index).get_local_depth(),
         ) as usize;
 
         let new_index = Directories::get_new_suffix_from_old(
             old_index as u64,
-            self.get(old_index).get_local_depth(),
+            self.get_subdir(old_index).get_local_depth(),
         ) as usize;
         if self.sub_dirs.len() <= new_index {
             self.double_size(memory_manager.clone());
         }
 
         self.split_dir(memory_manager.clone(), old_index);
+    }
+
+    pub fn add(&mut self, memory_manager: Arc<Mutex<MemoryManager>>, key: &String, value: &String) {
+        let index = self.get_subtable_index(key);
+        if !self
+            .get_subdir(index)
+            .add_slot(memory_manager.clone(), key, value)
+        {
+            self.rehash(memory_manager.clone(), index);
+            self.get_subdir(index)
+                .add_slot(memory_manager.clone(), key, value);
+        }
+    }
+
+    pub fn get(&mut self, key: &String) -> Option<String> {
+        let index = self.get_subtable_index(key);
+        self.get_subdir(index).get_by_key(key)
     }
 
     pub fn deref_directories(&mut self) -> Vec<Directory> {
@@ -570,7 +639,7 @@ impl Directories {
         new_sub_dirs
     }
 
-    pub fn get(&mut self, index: usize) -> &mut Directory {
+    pub fn get_subdir(&mut self, index: usize) -> &mut Directory {
         unsafe { &mut *(self.sub_dirs[index]) }
     }
 }

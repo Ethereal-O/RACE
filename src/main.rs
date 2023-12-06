@@ -16,7 +16,7 @@ fn print_dir_depth(directories: &mut Directories, dir_index: usize) {
     print!(
         "{} dir depth: {}\n",
         dir_index,
-        directories.get(dir_index).get_local_depth()
+        directories.get_subdir(dir_index).get_local_depth()
     );
 }
 
@@ -24,7 +24,11 @@ fn print_slot_depth(directories: &mut Directories, dir_index: usize) {
     print!(
         "{} slot depth: {}\n",
         dir_index,
-        directories.get(dir_index).get_subtable().bucket_groups[0].buckets[0]
+        directories
+            .get_subdir(dir_index)
+            .get_subtable()
+            .bucket_groups[0]
+            .buckets[0]
             .header
             .get_local_depth()
     );
@@ -34,7 +38,11 @@ fn print_slot_suffix(directories: &mut Directories, dir_index: usize) {
     print!(
         "{} slot suffix: {}\n",
         dir_index,
-        directories.get(dir_index).get_subtable().bucket_groups[0].buckets[0]
+        directories
+            .get_subdir(dir_index)
+            .get_subtable()
+            .bucket_groups[0]
+            .buckets[0]
             .header
             .get_suffix()
     );
@@ -62,32 +70,44 @@ fn main() {
     // println!("{:?}", kvb);
     let mut directories = Directories::new(memory_manager.clone());
 
-    // init value
-    print_all(&mut directories);
+    // // init value
+    // print_all(&mut directories);
 
-    // rehash first subtable
-    directories.rehash(memory_manager.clone(), 0);
-    print_all(&mut directories);
+    // // rehash first subtable
+    // directories.rehash(memory_manager.clone(), 0);
+    // print_all(&mut directories);
 
-    // rehash first subtable
-    directories.rehash(memory_manager.clone(), 0);
-    print_all(&mut directories);
+    // // rehash first subtable
+    // directories.rehash(memory_manager.clone(), 0);
+    // print_all(&mut directories);
 
-    // rehash second subtable
-    directories.rehash(memory_manager.clone(), 1);
-    print_all(&mut directories);
+    // // rehash second subtable
+    // directories.rehash(memory_manager.clone(), 1);
+    // print_all(&mut directories);
 
-    // rehash third subtable
-    directories.rehash(memory_manager.clone(), 2);
-    print_all(&mut directories);
+    // // rehash third subtable
+    // directories.rehash(memory_manager.clone(), 2);
+    // print_all(&mut directories);
 
-    // rehash third subtable
-    directories.rehash(memory_manager.clone(), 2);
-    print_all(&mut directories);
+    // // rehash third subtable
+    // directories.rehash(memory_manager.clone(), 2);
+    // print_all(&mut directories);
 
-    // rehash first subtable
-    directories.rehash(memory_manager.clone(), 0);
-    print_all(&mut directories);
+    // // rehash first subtable
+    // directories.rehash(memory_manager.clone(), 0);
+    // print_all(&mut directories);
 
-    // 0 1 2 3 4 1 6 3 0 1 10 3 4 1 6 3
+    // // 0 1 2 3 4 1 6 3 0 1 10 3 4 1 6 3
+
+    for i in 0..100 {
+        directories.add(
+            memory_manager.clone(),
+            &(String::from("key") + &i.to_string()),
+            &(String::from("value") + &i.to_string()),
+        );
+    }
+    for i in 0..100 {
+        let value = directories.get(&(String::from("key") + &i.to_string()));
+        println!("{:?}", value);
+    }
 }
