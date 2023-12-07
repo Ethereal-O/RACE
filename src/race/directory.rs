@@ -45,23 +45,14 @@ impl Entry {
         self.set_header(local_depth, suffix);
     }
 
-    pub fn set_header_and_localdepth(&mut self, local_depth: u8, suffix: u64) {
-        self.set_header(local_depth, suffix);
-        self.set_local_depth(local_depth);
-    }
-
-    pub fn set_header(&mut self, local_depth: u8, suffix: u64) {
-        self.get_subtable().set_header(local_depth, suffix);
-    }
-
     pub fn copy_from(memory_manager: Arc<Mutex<MemoryManager>>, entry: &Entry) -> *mut Self {
         let entry_pointer = memory_manager.lock().unwrap().malloc(size_of::<Entry>());
         if entry_pointer == std::ptr::null_mut() {
             panic!("malloc failed");
         }
         unsafe {
-            (*(entry_pointer as *mut Self)).set_subtable_pointer(entry.get_subtable_pointer());
-            (*(entry_pointer as *mut Self)).set_local_depth(entry.get_local_depth());
+            (*(entry_pointer as *mut Self))
+                .set_subtable_and_localdepth(entry.get_subtable_pointer(), entry.get_local_depth());
         }
         entry_pointer as *mut Self
     }
@@ -77,6 +68,30 @@ impl Entry {
 
     pub fn get_by_key(&self, key: &String) -> Option<String> {
         self.get_subtable().get_by_key(key)
+    }
+
+    pub fn set_subtable_and_localdepth(&mut self, subtable: u64, local_depth: u8) {
+        self.set_subtable_pointer(subtable);
+        self.set_local_depth(local_depth);
+    }
+
+    pub fn set_subtable_and_header_and_depth(
+        &mut self,
+        subtable: u64,
+        local_depth: u8,
+        suffix: u64,
+    ) {
+        self.set_subtable_pointer(subtable);
+        self.set_header_and_localdepth(local_depth, suffix);
+    }
+
+    pub fn set_header_and_localdepth(&mut self, local_depth: u8, suffix: u64) {
+        self.set_header(local_depth, suffix);
+        self.set_local_depth(local_depth);
+    }
+
+    pub fn set_header(&mut self, local_depth: u8, suffix: u64) {
+        self.get_subtable().set_header(local_depth, suffix);
     }
 
     pub fn get_lock(&self) -> u8 {
@@ -150,8 +165,12 @@ impl Directory {
         suffix & mask
     }
 
-    pub fn add_bit_to_suffix(suffix: u64, local_depth: u8) -> u64 {
-        suffix | 1 << (local_depth - 1)
+    pub fn add_bit_to_suffix(suffix: u64, index: u8) -> u64 {
+        suffix | (1 << (index - 1))
+    }
+
+    pub fn plus_bit_to_suffix(suffix: u64, index: u8) -> u64 {
+        suffix + (1 << (index - 1))
     }
 
     pub fn get_new_suffix_from_old(old_index: u64, old_local_depth: u8) -> u64 {
@@ -195,17 +214,18 @@ impl Directory {
         self.split_entry(memory_manager.clone(), old_index);
     }
 
-    pub fn move_items(&mut self, old_index: usize, new_index: usize) {}
+    pub fn move_items(&mut self, old_index: usize, new_index: usize) {
+        
+    }
 
     pub fn change_entry_suffix_subtable(&mut self, local_depth: u8, suffix: u64) {
+        let new_pointer = self.get_entry(suffix as usize).get_subtable_pointer();
         let mut index = suffix as usize;
         while index < self.entries.len() {
-            if Directory::restrict_suffix_to(index as u64, local_depth) == suffix {
-                let new_pointer = self.get_entry(suffix as usize).get_subtable_pointer();
-                self.get_entry(index).set_subtable_pointer(new_pointer);
-                self.get_entry(index).set_local_depth(local_depth);
-            }
-            index += 1;
+            // if Directory::restrict_suffix_to(index as u64, local_depth) == suffix {}
+            self.get_entry(index)
+                .set_subtable_and_localdepth(new_pointer, local_depth);
+            index = Directory::plus_bit_to_suffix(index as u64, local_depth + 1) as usize;
         }
     }
 
@@ -229,7 +249,7 @@ impl Directory {
 
         // change old subtable's local depth and suffix
         self.get_entry(old_index)
-            .set_header_and_localdepth(old_depth + 1, old_index as u64);
+            .set_header(old_depth + 1, old_index as u64);
 
         //  change all subtables with old suffix to new subtable
         self.change_entry_suffix_subtable(old_depth + 1, old_index as u64);

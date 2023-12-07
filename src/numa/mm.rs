@@ -9,17 +9,18 @@ extern "C" {
 struct Page {
     ptr: WrapperU8Ptr,
     used_size: usize,
+    tot_size: usize,
 }
 
 pub struct MemoryManager {
-    // pages : Vec<Page>
+    pages : Vec<Page>
 }
 
 impl MemoryManager {
     pub fn new() -> MemoryManager {
         unsafe {
             MemoryManager {
-                // pages: Vec::new(),
+                pages: Vec::new(),
             }
         }
     }
