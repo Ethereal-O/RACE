@@ -4,7 +4,7 @@ mod numa;
 mod race;
 
 use numa::mm::MemoryManager;
-use race::race_type::{Directories, KVBlockMem};
+use race::{directory, kvblock};
 use std::{
     ops::Deref,
     sync::{Arc, Mutex},
@@ -12,48 +12,40 @@ use std::{
 
 use crate::numa::numa::numa_free;
 
-fn print_dir_depth(directories: &mut Directories, dir_index: usize) {
+fn print_dir_depth(directory: &mut directory::Directory, dir_index: usize) {
     print!(
         "{} dir depth: {}\n",
         dir_index,
-        directories.get_subdir(dir_index).get_local_depth()
+        directory.get_entry(dir_index).get_local_depth()
     );
 }
 
-fn print_slot_depth(directories: &mut Directories, dir_index: usize) {
+fn print_slot_depth(directory: &mut directory::Directory, dir_index: usize) {
     print!(
         "{} slot depth: {}\n",
         dir_index,
-        directories
-            .get_subdir(dir_index)
-            .get_subtable()
-            .bucket_groups[0]
-            .buckets[0]
+        directory.get_entry(dir_index).get_subtable().bucket_groups[0].buckets[0]
             .header
             .get_local_depth()
     );
 }
 
-fn print_slot_suffix(directories: &mut Directories, dir_index: usize) {
+fn print_slot_suffix(directory: &mut directory::Directory, dir_index: usize) {
     print!(
         "{} slot suffix: {}\n",
         dir_index,
-        directories
-            .get_subdir(dir_index)
-            .get_subtable()
-            .bucket_groups[0]
-            .buckets[0]
+        directory.get_entry(dir_index).get_subtable().bucket_groups[0].buckets[0]
             .header
             .get_suffix()
     );
 }
 
-fn print_all(directories: &mut Directories) {
-    let dir_num = directories.sub_dirs.len();
+fn print_all(directory: &mut directory::Directory) {
+    let dir_num = directory.entries.len();
     for i in 0..dir_num {
-        print_dir_depth(directories, i);
-        print_slot_depth(directories, i);
-        print_slot_suffix(directories, i);
+        print_dir_depth(directory, i);
+        print_slot_depth(directory, i);
+        print_slot_suffix(directory, i);
     }
 }
 
@@ -68,7 +60,7 @@ fn main() {
     // );
     // let kvb = unsafe { (*kvbm).get() };
     // println!("{:?}", kvb);
-    let mut directories = Directories::new(memory_manager.clone());
+    let mut directories = directory::Directory::new(memory_manager.clone());
 
     // // init value
     // print_all(&mut directories);
