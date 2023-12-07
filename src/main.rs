@@ -4,13 +4,14 @@ mod numa;
 mod race;
 
 use numa::mm::MemoryManager;
+use race::kvblock::KVBlockMem;
 use race::{directory, kvblock};
 use std::{
     ops::Deref,
     sync::{Arc, Mutex},
 };
 
-use crate::numa::numa::numa_free;
+use crate::{numa::numa::numa_free, race::hash};
 
 fn print_dir_depth(directory: &mut directory::Directory, dir_index: usize) {
     print!(
@@ -60,7 +61,7 @@ fn main() {
     // );
     // let kvb = unsafe { (*kvbm).get() };
     // println!("{:?}", kvb);
-    let mut directories = directory::Directory::new(memory_manager.clone());
+    let mut directory = directory::Directory::new(memory_manager.clone());
 
     // // init value
     // print_all(&mut directories);
@@ -92,14 +93,103 @@ fn main() {
     // // 0 1 2 3 4 1 6 3 0 1 10 3 4 1 6 3
 
     for i in 0..100 {
-        directories.add(
+        directory.add(
             memory_manager.clone(),
             &(String::from("key") + &i.to_string()),
             &(String::from("value") + &i.to_string()),
         );
     }
     for i in 0..100 {
-        let value = directories.get(&(String::from("key") + &i.to_string()));
-        println!("{:?}", value);
+        let key = String::from("key") + &i.to_string();
+        let fp = hash::Hash::hash(&key, 3) as u8;
+        match directory.get(
+            0, // test only
+            hash::Hash::hash(&key, 1) as usize,
+            hash::Hash::hash(&key, 2) as usize,
+        ) {
+            Some(v) => {
+                let mut flag = false;
+                for slot in v[0].main_bucket.slots.iter() {
+                    //println!("{} {}", slot.get_fingerprint(), fp);
+                    if slot.data == 0 {
+                        break;
+                    } else {
+                        if slot.get_fingerprint() == fp {
+                            let kv_pointer = slot.get_kv_pointer();
+                            let kv = unsafe { (*(kv_pointer as *mut KVBlockMem)).get() };
+                            if kv.key == key {
+                                println!("{:?}", Some(kv.value));
+                                flag = true;
+                                break;
+                            }
+                        }
+                    }
+                }
+                if flag == true {
+                    continue;
+                }
+
+                for slot in v[0].overflow_bucket.slots.iter() {
+                    //println!("{} {}", slot.get_fingerprint(), fp);
+                    if slot.data == 0 {
+                        break;
+                    } else {
+                        if slot.get_fingerprint() == fp {
+                            let kv_pointer = slot.get_kv_pointer();
+                            let kv = unsafe { (*(kv_pointer as *mut KVBlockMem)).get() };
+                            if kv.key == key {
+                                println!("{:?}", Some(kv.value));
+                                flag = true;
+                                break;
+                            }
+                        }
+                    }
+                }
+                if flag == true {
+                    continue;
+                }
+
+                for slot in v[1].main_bucket.slots.iter() {
+                    //println!("{} {}", slot.get_fingerprint(), fp);
+                    if slot.data == 0 {
+                        break;
+                    } else {
+                        if slot.get_fingerprint() == fp {
+                            let kv_pointer = slot.get_kv_pointer();
+                            let kv = unsafe { (*(kv_pointer as *mut KVBlockMem)).get() };
+                            if kv.key == key {
+                                println!("{:?}", Some(kv.value));
+                                flag = true;
+                                break;
+                            }
+                        }
+                    }
+                }
+                if flag == true {
+                    continue;
+                }
+
+                for slot in v[1].overflow_bucket.slots.iter() {
+                    //println!("{} {}", slot.get_fingerprint(), fp);
+                    if slot.data == 0 {
+                        break;
+                    } else {
+                        if slot.get_fingerprint() == fp {
+                            let kv_pointer = slot.get_kv_pointer();
+                            let kv = unsafe { (*(kv_pointer as *mut KVBlockMem)).get() };
+                            if kv.key == key {
+                                println!("{:?}", Some(kv.value));
+                                flag = true;
+                                break;
+                            }
+                        }
+                    }
+                }
+                if flag == false {
+                    panic!("Not Found!");
+                }
+            }
+            None => panic!("Not Found!"),
+        }
     }
 }

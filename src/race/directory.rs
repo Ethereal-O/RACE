@@ -5,6 +5,9 @@ use crate::race::hash::Hash;
 use crate::race::subtable::Subtable;
 use std::mem::size_of;
 use std::sync::{Arc, Mutex};
+
+use super::subtable::BucketGroup;
+use super::subtable::CombinedBucket;
 pub struct Entry {
     pub data: u64,
 }
@@ -66,8 +69,8 @@ impl Entry {
         self.get_subtable().add_slot(memory_manager, key, value)
     }
 
-    pub fn get_by_key(&self, key: &String) -> Option<String> {
-        self.get_subtable().get_by_key(key)
+    pub fn get_by_bucket_ids(&self, bucket1: usize, bucket2: usize) -> Option<[CombinedBucket; 2]> {
+        self.get_subtable().get_by_bucket_ids(bucket1, bucket2)
     }
 
     pub fn set_subtable_and_localdepth(&mut self, subtable: u64, local_depth: u8) {
@@ -186,6 +189,7 @@ impl Directory {
 
     pub fn new(memory_manager: Arc<Mutex<MemoryManager>>) -> Self {
         let mut entries = Vec::new();
+        //entries.push(Entry::new(memory_manager.clone(), 1, 0));
         entries.push(Entry::new(memory_manager, 0, 0));
         Directory { entries }
     }
@@ -214,9 +218,7 @@ impl Directory {
         self.split_entry(memory_manager.clone(), old_index);
     }
 
-    pub fn move_items(&mut self, old_index: usize, new_index: usize) {
-        
-    }
+    pub fn move_items(&mut self, old_index: usize, new_index: usize) {}
 
     pub fn change_entry_suffix_subtable(&mut self, local_depth: u8, suffix: u64) {
         let new_pointer = self.get_entry(suffix as usize).get_subtable_pointer();
@@ -289,9 +291,13 @@ impl Directory {
         }
     }
 
-    pub fn get(&mut self, key: &String) -> Option<String> {
-        let index = self.get_subtable_index(key);
-        self.get_entry(index).get_by_key(key)
+    pub fn get(
+        &mut self,
+        index: usize,
+        bucket1: usize,
+        bucket2: usize,
+    ) -> Option<[CombinedBucket; 2]> {
+        self.get_entry(index).get_by_bucket_ids(bucket1, bucket2)
     }
 
     pub fn deref_directory(&mut self) -> Vec<Entry> {

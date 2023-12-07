@@ -6,6 +6,7 @@ use crate::race::kvblock::{KVBlock, KVBlockMem};
 use std::mem::size_of;
 use std::sync::{Arc, Mutex};
 
+#[derive(Clone)]
 pub struct Slot {
     pub data: u64,
 }
@@ -100,6 +101,7 @@ impl Slot {
     }
 }
 
+#[derive(Clone)]
 pub struct Header {
     pub data: u64,
 }
@@ -183,6 +185,18 @@ impl Bucket {
         self.header.set_local_depth(local_depth);
         self.header.set_suffix(suffix);
     }
+
+    pub fn clone(&self) -> Bucket {
+        Bucket {
+            header: self.header.clone(),
+            slots: self.slots.clone(),
+        }
+    }
+}
+
+pub struct CombinedBucket {
+    pub main_bucket: Bucket,
+    pub overflow_bucket: Bucket,
 }
 
 pub struct BucketGroup {
@@ -258,13 +272,19 @@ impl Subtable {
         try_add_result
     }
 
-    pub fn get_by_key(&self, key: &String) -> Option<String> {
-        let mut value = None;
-        value = self.bucket_groups[Hash::hash(key, 1) as usize].get_by_key(key, 1);
-        if value.is_none() {
-            value = self.bucket_groups[Hash::hash(key, 2) as usize].get_by_key(key, 2);
+    pub fn get_by_bucket_ids(&self, bucket1: usize, bucket2: usize) -> Option<[CombinedBucket; 2]> {
+        if bucket1 >= 2 * CONFIG.bucket_group_num || bucket2 >= 2 * CONFIG.bucket_group_num {
+            return None;
         }
-        value
+        let cb1 = CombinedBucket {
+            main_bucket: self.bucket_groups[bucket1].buckets[0].clone(),
+            overflow_bucket: self.bucket_groups[bucket1].buckets[1].clone(),
+        };
+        let cb2 = CombinedBucket {
+            main_bucket: self.bucket_groups[bucket2].buckets[2].clone(),
+            overflow_bucket: self.bucket_groups[bucket2].buckets[1].clone(),
+        };
+        Some([cb1, cb2])
     }
 
     pub fn set_header(&mut self, local_depth: u8, suffix: u64) {
