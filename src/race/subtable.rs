@@ -4,7 +4,7 @@ use crate::numa::mm::MemoryManager;
 use crate::race::hash::Hash;
 use crate::race::kvblock::{KVBlock, KVBlockMem};
 use std::mem::size_of;
-use std::sync::{Arc, Mutex};
+use std::sync::{atomic, Arc, Mutex};
 
 #[derive(Clone)]
 pub struct Slot {
@@ -12,19 +12,32 @@ pub struct Slot {
 }
 
 impl Slot {
-    pub fn set_all(
-        &mut self,
-        memory_manager: Arc<Mutex<MemoryManager>>,
-        key: &String,
-        value: &String,
-    ) {
-        let kvblock_pointer = KVBlockMem::new(key, value, memory_manager);
-        self.set_kv_pointer(kvblock_pointer as u64);
-        self.set_fingerprint(Hash::hash(&key, 3) as u8);
+    pub fn compare_and_swap(&mut self, data: u64) -> bool {
         unsafe {
-            self.set_length((*(kvblock_pointer as *mut KVBlockMem)).get_total_length() as u8);
+            match std::mem::transmute::<&u64, &atomic::AtomicU64>(&self.data).compare_exchange(
+                0,
+                data,
+                atomic::Ordering::SeqCst,
+                atomic::Ordering::SeqCst,
+            ) {
+                Ok(_) => true,
+                Err(_) => false,
+            }
         }
     }
+    // pub fn set_all(
+    //     &mut self,
+    //     memory_manager: Arc<Mutex<MemoryManager>>,
+    //     key: &String,
+    //     value: &String,
+    // ) {
+    //     let kvblock_pointer = KVBlockMem::new(key, value, memory_manager);
+    //     self.set_kv_pointer(kvblock_pointer as u64);
+    //     self.set_fingerprint(Hash::hash(&key, 3) as u8);
+    //     unsafe {
+    //         self.set_length((*(kvblock_pointer as *mut KVBlockMem)).get_total_length() as u8);
+    //     }
+    // }
 
     pub fn get_fingerprint(&self) -> u8 {
         (self.data
@@ -32,15 +45,15 @@ impl Slot {
             as u8
     }
 
-    pub fn set_fingerprint(&mut self, fp: u8) {
-        self.data = (self.data
-            & !(0xFF
-                << CONFIG.bits_of_byte
-                    * (size_of::<u64>() - size_of::<u8>() - CONFIG.slot_fp_offset)))
-            | ((fp as u64)
-                << CONFIG.bits_of_byte
-                    * (size_of::<u64>() - size_of::<u8>() - CONFIG.slot_fp_offset));
-    }
+    // pub fn set_fingerprint(&mut self, fp: u8) {
+    //     self.data = (self.data
+    //         & !(0xFF
+    //             << CONFIG.bits_of_byte
+    //                 * (size_of::<u64>() - size_of::<u8>() - CONFIG.slot_fp_offset)))
+    //         | ((fp as u64)
+    //             << CONFIG.bits_of_byte
+    //                 * (size_of::<u64>() - size_of::<u8>() - CONFIG.slot_fp_offset));
+    // }
 
     pub fn get_length(&self) -> u8 {
         (self.data
@@ -48,15 +61,15 @@ impl Slot {
             as u8
     }
 
-    pub fn set_length(&mut self, len: u8) {
-        self.data = (self.data
-            & !(0xFF
-                << CONFIG.bits_of_byte
-                    * (size_of::<u64>() - size_of::<u8>() - CONFIG.slot_len_offset)))
-            | ((len as u64)
-                << CONFIG.bits_of_byte
-                    * (size_of::<u64>() - size_of::<u8>() - CONFIG.slot_len_offset));
-    }
+    // pub fn set_length(&mut self, len: u8) {
+    //     self.data = (self.data
+    //         & !(0xFF
+    //             << CONFIG.bits_of_byte
+    //                 * (size_of::<u64>() - size_of::<u8>() - CONFIG.slot_len_offset)))
+    //         | ((len as u64)
+    //             << CONFIG.bits_of_byte
+    //                 * (size_of::<u64>() - size_of::<u8>() - CONFIG.slot_len_offset));
+    // }
 
     pub fn get_kv(&self) -> KVBlock {
         let kv_pointer = self.get_kv_pointer();
@@ -89,16 +102,16 @@ impl Slot {
                     * (size_of::<u64>() - size_of::<u8>() - CONFIG.slot_len_offset))) as u64
     }
 
-    pub fn set_kv_pointer(&mut self, ptr: u64) {
-        self.data = (self.data
-            & (0xFF
-                << CONFIG.bits_of_byte
-                    * (size_of::<u64>() - size_of::<u8>() - CONFIG.slot_fp_offset))
-            & (0xFF
-                << CONFIG.bits_of_byte
-                    * (size_of::<u64>() - size_of::<u8>() - CONFIG.slot_len_offset)))
-            | ptr;
-    }
+    // pub fn set_kv_pointer(&mut self, ptr: u64) {
+    //     self.data = (self.data
+    //         & (0xFF
+    //             << CONFIG.bits_of_byte
+    //                 * (size_of::<u64>() - size_of::<u8>() - CONFIG.slot_fp_offset))
+    //         & (0xFF
+    //             << CONFIG.bits_of_byte
+    //                 * (size_of::<u64>() - size_of::<u8>() - CONFIG.slot_len_offset)))
+    //         | ptr;
+    // }
 }
 
 #[derive(Clone)]
@@ -157,18 +170,14 @@ impl Bucket {
         used_slot_num
     }
 
-    pub fn add_slot(
-        &mut self,
-        memory_manager: Arc<Mutex<MemoryManager>>,
-        key: &String,
-        value: &String,
-    ) -> bool {
-        let used_slot_num = self.get_used_slot_num();
-        if used_slot_num == CONFIG.slot_num {
-            return false;
-        }
-        self.slots[used_slot_num].set_all(memory_manager, key, value);
-        true
+    pub fn set(&mut self, slot: usize, data: u64) -> bool {
+        // let used_slot_num = self.get_used_slot_num();
+        // if used_slot_num == CONFIG.slot_num {
+        //     return false;
+        // }
+        // self.slots[used_slot_num].set_all(memory_manager, key, value);
+        // true
+        self.slots[slot].compare_and_swap(data)
     }
 
     pub fn get_by_key(&self, key: &String) -> Option<String> {
@@ -204,23 +213,18 @@ pub struct BucketGroup {
 }
 
 impl BucketGroup {
-    pub fn add_slot(
-        &mut self,
-        method: u8,
-        memory_manager: Arc<Mutex<MemoryManager>>,
-        key: &String,
-        value: &String,
-    ) -> bool {
-        let mut try_add_result = false;
-        match method {
-            1 => try_add_result = self.buckets[0].add_slot(memory_manager.clone(), key, value),
-            2 => try_add_result = self.buckets[2].add_slot(memory_manager.clone(), key, value),
-            _ => panic!("method error"),
-        }
-        if !try_add_result {
-            try_add_result = self.buckets[1].add_slot(memory_manager.clone(), key, value);
-        }
-        try_add_result
+    pub fn set(&mut self, bucket: usize, slot: usize, data: u64) -> bool {
+        // let mut try_add_result = false;
+        // match method {
+        //     1 => try_add_result = self.buckets[0].add_slot(memory_manager.clone(), key, value),
+        //     2 => try_add_result = self.buckets[2].add_slot(memory_manager.clone(), key, value),
+        //     _ => panic!("method error"),
+        // }
+        // if !try_add_result {
+        //     try_add_result = self.buckets[1].add_slot(memory_manager.clone(), key, value);
+        // }
+        // try_add_result
+        self.buckets[bucket].set(slot, data)
     }
 
     pub fn get_by_key(&self, key: &String, method: u8) -> Option<String> {
@@ -248,28 +252,24 @@ pub struct Subtable {
 }
 
 impl Subtable {
-    pub fn add_slot(
-        &mut self,
-        memory_manager: Arc<Mutex<MemoryManager>>,
-        key: &String,
-        value: &String,
-    ) -> bool {
-        let mut try_add_result = false;
-        try_add_result = self.bucket_groups[Hash::hash(key, 1) as usize].add_slot(
-            1,
-            memory_manager.clone(),
-            key,
-            value,
-        );
-        if !try_add_result {
-            try_add_result = self.bucket_groups[Hash::hash(key, 2) as usize].add_slot(
-                2,
-                memory_manager.clone(),
-                key,
-                value,
-            );
-        }
-        try_add_result
+    pub fn set(&mut self, bucket_group: usize, bucket: usize, slot: usize, data: u64) -> bool {
+        // let mut try_add_result = false;
+        // try_add_result = self.bucket_groups[Hash::hash(key, 1) as usize].add_slot(
+        //     1,
+        //     memory_manager.clone(),
+        //     key,
+        //     value,
+        // );
+        // if !try_add_result {
+        //     try_add_result = self.bucket_groups[Hash::hash(key, 2) as usize].add_slot(
+        //         2,
+        //         memory_manager.clone(),
+        //         key,
+        //         value,
+        //     );
+        // }
+        // try_add_result
+        self.bucket_groups[bucket_group].set(bucket, slot, data)
     }
 
     pub fn get_by_bucket_ids(&self, bucket1: usize, bucket2: usize) -> Option<[CombinedBucket; 2]> {
