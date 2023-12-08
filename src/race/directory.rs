@@ -60,13 +60,8 @@ impl Entry {
         entry_pointer as *mut Self
     }
 
-    pub fn add_slot(
-        &mut self,
-        memory_manager: Arc<Mutex<MemoryManager>>,
-        key: &String,
-        value: &String,
-    ) -> bool {
-        self.get_subtable().add_slot(memory_manager, key, value)
+    pub fn set(&mut self, bucket_group: usize, bucket: usize, slot: usize, data: u64) -> bool {
+        self.get_subtable().set(bucket_group, bucket, slot, data)
     }
 
     pub fn get_by_bucket_ids(&self, bucket1: usize, bucket2: usize) -> Option<[CombinedBucket; 2]> {
@@ -279,16 +274,24 @@ impl Directory {
         self.split_entry(memory_manager.clone(), old_index);
     }
 
-    pub fn add(&mut self, memory_manager: Arc<Mutex<MemoryManager>>, key: &String, value: &String) {
-        let index = self.get_subtable_index(key);
-        if !self
-            .get_entry(index)
-            .add_slot(memory_manager.clone(), key, value)
-        {
-            self.rehash(memory_manager.clone(), index);
-            self.get_entry(index)
-                .add_slot(memory_manager.clone(), key, value);
-        }
+    pub fn set(
+        &mut self,
+        index: usize,
+        bucket_group: usize,
+        bucket: usize,
+        slot: usize,
+        data: u64,
+    ) -> bool {
+        // let index = self.get_subtable_index(key);
+        // if !self
+        //     .get_entry(index)
+        //     .add_slot(memory_manager.clone(), key, value)
+        // {
+        //     self.rehash(memory_manager.clone(), index);
+        //     self.get_entry(index)
+        //         .add_slot(memory_manager.clone(), key, value);
+        // }
+        self.get_entry(index).set(bucket_group, bucket, slot, data)
     }
 
     pub fn get(
