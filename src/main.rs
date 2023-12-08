@@ -196,7 +196,7 @@ fn main() {
 
     let mut vec: Vec<*mut u8> = Vec::new();
 
-    for i in 0..257 {
+    for i in 0..256 {
         let ptr = memory_manager
             .lock()
             .unwrap()
@@ -204,11 +204,14 @@ fn main() {
         vec.push(ptr);
     }
 
-    for i in 0..257 {
-        let ptr = vec.pop().unwrap();
+    for i in 0..vec.len() {
+        let ptr = vec[(i * 31) % vec.len()];
         memory_manager
             .lock()
             .unwrap()
             .free(ptr, size_of::<KVBlockMem>());
     }
+    let ptr = memory_manager.lock().unwrap().malloc(4096);
+
+    // print!("{}\n", memory_manager.lock().unwrap().pages.len());
 }

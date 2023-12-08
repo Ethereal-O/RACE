@@ -36,7 +36,7 @@ impl MemoryManager {
     fn alloc_new_page(&mut self, num: usize) {
         let ptr = Numa::numa_alloc_onnode(num * CONFIG.page_size, 0);
         if CONFIG.enable_mm_debug {
-            print!("alloc new page: {}\n", num);
+            print!("[alloc] alloc new page: {}\n", num);
         }
         for i in 0..num * CONFIG.page_size {
             unsafe {
@@ -62,14 +62,16 @@ impl MemoryManager {
             if page.tot_size - page.used_size >= size {
                 if CONFIG.enable_mm_debug {
                     print!(
-                        "find from alloced pages: size: {}, tot_size: {}, used_size: {}\n",
+                        "[malloc] find from alloced pages: size: {}, tot_size: {}, used_size: {}\n",
                         size, page.tot_size, page.used_size
                     );
                 }
                 let mut free_list = page.free_list.clone();
                 let mut free = free_list.unwrap().clone();
                 let mut prev = free.clone();
+                let mut is_head = true;
                 while free.lock().unwrap().size < size {
+                    is_head = false;
                     prev = free.clone();
                     if free.lock().unwrap().next.is_none() {
                         break;
@@ -77,15 +79,23 @@ impl MemoryManager {
                     let tmp = free.clone();
                     free = tmp.lock().unwrap().next.clone().unwrap();
                 }
-                if CONFIG.enable_mm_debug {
-                    print!("get free: {}\n", free.lock().unwrap().size);
-                }
                 if free.lock().unwrap().size < size {
                     continue;
                 }
+                if CONFIG.enable_mm_debug {
+                    print!(
+                        "[malloc] get free: {}, is_head: {}\n",
+                        free.lock().unwrap().size,
+                        is_head
+                    );
+                }
                 if free.lock().unwrap().size == size {
-                    let new_next = free.lock().unwrap().next.clone();
-                    prev.lock().unwrap().next = new_next;
+                    if is_head {
+                        page.free_list = free.lock().unwrap().next.clone();
+                    } else {
+                        let new_next = free.lock().unwrap().next.clone();
+                        prev.lock().unwrap().next = new_next;
+                    }
                     page.used_size += size;
                     return Some(free.lock().unwrap().ptr);
                 } else {
@@ -97,8 +107,11 @@ impl MemoryManager {
                         size: new_size,
                         next: new_next,
                     }));
-                    page.free_list = Some(new_free.clone());
-                    prev.lock().unwrap().next = Some(new_free);
+                    if is_head {
+                        page.free_list = Some(new_free.clone());
+                    } else {
+                        prev.lock().unwrap().next = Some(new_free.clone());
+                    }
                     page.used_size += size;
                     return Some(free.lock().unwrap().ptr);
                 }
@@ -109,11 +122,18 @@ impl MemoryManager {
 
     pub fn merge(page: &mut Page) {
         let mut free_list = page.free_list.clone();
+        if free_list.is_none() {
+            return;
+        }
         let mut free = free_list.unwrap().clone();
         let mut prev = free.clone();
-        while free.lock().unwrap().next.is_some() {
-            let tmp = free.clone();
-            free = tmp.lock().unwrap().next.clone().unwrap();
+        if free.lock().unwrap().next.is_some() {
+            free = prev.lock().unwrap().next.clone().unwrap();
+        } else {
+            return;
+        }
+        while prev.lock().unwrap().next.is_some() {
+            free = prev.lock().unwrap().next.clone().unwrap();
             let prev_size = prev.lock().unwrap().size;
             if free.lock().unwrap().ptr
                 == unsafe { prev.lock().unwrap().ptr.offset(prev_size as isize) }
@@ -126,17 +146,36 @@ impl MemoryManager {
         }
     }
 
-    pub fn insert(&mut self, ptr: *mut u8, size: usize) {
+    pub fn insert(&mut self, ptr: *mut u8, mut size: usize) {
+        size = (size & (!(CONFIG.align_bytes - 1)))
+            + ((size & (CONFIG.align_bytes - 1)) != 0) as usize * CONFIG.align_bytes;
         for page in self.pages.iter_mut() {
             if page.start_ptr <= ptr
                 && ptr < unsafe { page.start_ptr.offset(page.tot_size as isize) }
             {
                 if CONFIG.enable_mm_debug {
                     print!(
-                        "find chunk: size: {}, tot_size: {}, used_size: {}\n",
-                        size, page.tot_size, page.used_size
+                        "[free] find chunk: size: {}, tot_size: {}, used_size: {}, has_free_list: {}\n",
+                        size,
+                        page.tot_size,
+                        page.used_size,
+                        page.free_list.is_some()
                     );
                 }
+                if page.free_list.is_none() {
+                    if page.tot_size < size {
+                        panic!("[free] free error: tot_size < size");
+                    }
+
+                    page.free_list = Some(Arc::new(Mutex::new(Free {
+                        ptr,
+                        size,
+                        next: None,
+                    })));
+                    page.used_size -= size;
+                    return;
+                }
+
                 let mut free_list = page.free_list.clone();
                 let mut free = free_list.unwrap().clone();
                 let mut prev = free.clone();
@@ -150,6 +189,26 @@ impl MemoryManager {
                     let tmp = free.clone();
                     free = tmp.lock().unwrap().next.clone().unwrap();
                 }
+
+                if CONFIG.enable_mm_debug {
+                    print!(
+                        "[free] get next free: {}, is_head: {}\n",
+                        free.lock().unwrap().size,
+                        is_head
+                    );
+                }
+
+                let mut ptr_bound = ptr;
+                if !is_head && !prev.lock().unwrap().next.is_some() {
+                    ptr_bound = unsafe { page.start_ptr.offset(page.tot_size as isize) };
+                } else {
+                    ptr_bound = free.lock().unwrap().ptr;
+                }
+
+                if ptr_bound < unsafe { ptr.offset(size as isize) } {
+                    panic!("[free] free error: ptr + size > ptr_bound");
+                }
+
                 // insert new free
                 if is_head {
                     let new_next = free.clone();
@@ -179,7 +238,7 @@ impl MemoryManager {
     pub fn malloc(&mut self, size: usize) -> *mut u8 {
         let mut ptr = self.find_from_alloced_pages(size);
         if CONFIG.enable_mm_debug {
-            print!("malloc: {} find: {}\n", size, ptr.is_some());
+            print!("[malloc] malloc: {} find: {}\n", size, ptr.is_some());
         }
         if ptr.is_none() {
             self.alloc_new_page(size / CONFIG.page_size + (size % CONFIG.page_size > 0) as usize);
