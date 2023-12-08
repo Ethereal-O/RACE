@@ -1,5 +1,8 @@
 pub struct RaceConfig {
+    pub enable_mm_debug: bool,
     pub bits_of_byte: usize,
+    pub page_size: usize,
+    pub align_bytes: usize,
     pub bucket_group_num: usize,
     pub bucket_num: usize,
     pub slot_num: usize,
@@ -14,7 +17,10 @@ pub struct RaceConfig {
 }
 
 pub const CONFIG: RaceConfig = RaceConfig {
+    enable_mm_debug: false,
     bits_of_byte: 8,
+    page_size: 4096,
+    align_bytes: 8,
     bucket_group_num: 1024,
     bucket_num: 3,
     slot_num: 7,
