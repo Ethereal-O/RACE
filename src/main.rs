@@ -204,6 +204,23 @@ fn main() {
         vec.push(ptr);
     }
 
+    for i in 0..128 {
+        let ptr = vec[(i * 31) % vec.len()];
+        memory_manager
+            .lock()
+            .unwrap()
+            .free(ptr, size_of::<KVBlockMem>());
+        vec.remove((i * 31) % vec.len());
+    }
+
+    for i in 0..128 {
+        let ptr = memory_manager
+            .lock()
+            .unwrap()
+            .malloc(size_of::<KVBlockMem>());
+        vec.push(ptr);
+    }
+
     for i in 0..vec.len() {
         let ptr = vec[(i * 31) % vec.len()];
         memory_manager
@@ -211,6 +228,7 @@ fn main() {
             .unwrap()
             .free(ptr, size_of::<KVBlockMem>());
     }
+
     let ptr = memory_manager.lock().unwrap().malloc(4096);
 
     // print!("{}\n", memory_manager.lock().unwrap().pages.len());
