@@ -60,8 +60,16 @@ impl Entry {
         entry_pointer as *mut Self
     }
 
-    pub fn set(&mut self, bucket_group: usize, bucket: usize, slot: usize, data: u64) -> bool {
-        self.get_subtable().set(bucket_group, bucket, slot, data)
+    pub fn set(
+        &mut self,
+        bucket_group: usize,
+        bucket: usize,
+        slot: usize,
+        data: u64,
+        old: u64,
+    ) -> bool {
+        self.get_subtable()
+            .set(bucket_group, bucket, slot, data, old)
     }
 
     pub fn get_by_bucket_ids(&self, bucket1: usize, bucket2: usize) -> Option<[CombinedBucket; 2]> {
@@ -281,17 +289,10 @@ impl Directory {
         bucket: usize,
         slot: usize,
         data: u64,
+        old: u64,
     ) -> bool {
-        // let index = self.get_subtable_index(key);
-        // if !self
-        //     .get_entry(index)
-        //     .add_slot(memory_manager.clone(), key, value)
-        // {
-        //     self.rehash(memory_manager.clone(), index);
-        //     self.get_entry(index)
-        //         .add_slot(memory_manager.clone(), key, value);
-        // }
-        self.get_entry(index).set(bucket_group, bucket, slot, data)
+        self.get_entry(index)
+            .set(bucket_group, bucket, slot, data, old)
     }
 
     pub fn get(
