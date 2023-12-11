@@ -3,8 +3,11 @@ use crate::numa::mm::memcpy;
 use crate::numa::mm::MemoryManager;
 use crate::race::hash::Hash;
 use crate::race::subtable::Subtable;
+use crate::utils;
 use std::mem::size_of;
+use std::sync::atomic::AtomicU64;
 use std::sync::{Arc, Mutex};
+use std::vec;
 
 use super::subtable::BucketGroup;
 use super::subtable::CombinedBucket;
@@ -13,23 +16,14 @@ pub struct Entry {
 }
 
 impl Entry {
-    pub fn new(
+    pub fn init(
+        &mut self,
         memory_manager: Arc<Mutex<MemoryManager>>,
         local_depth: u8,
         suffix: u64,
-    ) -> *mut Self {
-        let directory_pointer = memory_manager
-            .lock()
-            .unwrap()
-            .malloc(size_of::<Directory>());
-        if directory_pointer == std::ptr::null_mut() {
-            panic!("malloc failed");
-        }
-        unsafe {
-            (*(directory_pointer as *mut Self)).new_subtable(memory_manager, local_depth, suffix);
-            (*(directory_pointer as *mut Self)).set_local_depth(local_depth);
-        }
-        directory_pointer as *mut Self
+    ) {
+        self.new_subtable(memory_manager, local_depth, suffix);
+        self.set_local_depth(local_depth);
     }
 
     pub fn new_subtable(
@@ -162,7 +156,8 @@ impl Entry {
 }
 
 pub struct Directory {
-    pub entries: Vec<*mut Entry>,
+    pub d_size: *mut usize,
+    pub entries: *mut [Entry; CONFIG.max_entry_num],
 }
 
 impl Directory {
@@ -187,22 +182,37 @@ impl Directory {
     }
 
     pub fn get_subtable_index(&mut self, key: &String) -> usize {
-        ((self.entries.len() as u64 - 1) & Hash::hash(key, 1)) as usize
+        unsafe { ((*(self.d_size) as u64 - 1) & Hash::hash(key, 1)) as usize }
     }
 
     pub fn new(memory_manager: Arc<Mutex<MemoryManager>>) -> Self {
-        let mut entries = Vec::new();
-        //entries.push(Entry::new(memory_manager.clone(), 1, 0));
-        entries.push(Entry::new(memory_manager, 0, 0));
-        Directory { entries }
+        let vec_pointer = memory_manager
+            .lock()
+            .unwrap()
+            .malloc(CONFIG.entry_size * CONFIG.max_entry_num);
+        let d_size_pointer = memory_manager.lock().unwrap().malloc(CONFIG.ptr_size);
+        unsafe {
+            (*(vec_pointer as *mut [Entry; CONFIG.max_entry_num]))[0].init(
+                memory_manager.clone(),
+                1,
+                0,
+            );
+            (*(vec_pointer as *mut [Entry; CONFIG.max_entry_num]))[0].init(memory_manager, 1, 1);
+            *(d_size_pointer as *mut usize) = 2;
+            Directory {
+                d_size: d_size_pointer as *mut usize,
+                entries: vec_pointer as *mut [Entry; CONFIG.max_entry_num],
+            }
+        }
     }
 
     pub fn double_size(&mut self, memory_manager: Arc<Mutex<MemoryManager>>) {
-        let old_size = self.entries.len();
+        let old_size =
+            unsafe { (*(self.d_size as *mut AtomicU64)).load(std::sync::atomic::Ordering::SeqCst) };
         for index in 0..old_size {
             self.entries
                 .push(Entry::copy_from(memory_manager.clone(), unsafe {
-                    &*self.entries[index]
+                    &(*(self.entries))[index]
                 }));
         }
     }
@@ -315,6 +325,6 @@ impl Directory {
     }
 
     pub fn get_entry(&mut self, index: usize) -> &mut Entry {
-        unsafe { &mut *(self.entries[index]) }
+        unsafe { &mut (*(self.entries))[index] }
     }
 }

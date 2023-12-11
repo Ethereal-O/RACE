@@ -53,7 +53,7 @@ fn print_all(directory: &mut directory::Directory) {
     }
 }
 
-// This function can be used to implement "Insert"!
+// This function can be used to implement "Insert, Update and Delete"!
 fn test_insert(
     directory: &mut directory::Directory,
     bias: i32,
@@ -182,107 +182,6 @@ fn main() {
     // print_all(&mut directory);
 
     // // 0 1 2 3 4 1 6 3 0 1 10 3 4 1 6 3
-
-    // for i in 0..100 {
-    //     directory.add(
-    //         memory_manager.clone(),
-    //         &(String::from("key") + &i.to_string()),
-    //         &(String::from("value") + &i.to_string()),
-    //     );
-    // }
-    // for i in 0..100 {
-    //     let key = String::from("key") + &i.to_string();
-    //     let fp = hash::Hash::hash(&key, 3) as u8;
-    //     match directory.get(
-    //         0, // test only
-    //         hash::Hash::hash(&key, 1) as usize,
-    //         hash::Hash::hash(&key, 2) as usize,
-    //     ) {
-    //         Some(v) => {
-    //             let mut flag = false;
-    //             for slot in v[0].main_bucket.slots.iter() {
-    //                 //println!("{} {}", slot.get_fingerprint(), fp);
-    //                 if slot.data == 0 {
-    //                     break;
-    //                 } else {
-    //                     if slot.get_fingerprint() == fp {
-    //                         let kv_pointer = slot.get_kv_pointer();
-    //                         let kv = unsafe { (*(kv_pointer as *mut KVBlockMem)).get() };
-    //                         if kv.key == key {
-    //                             println!("{:?}", Some(kv.value));
-    //                             flag = true;
-    //                             break;
-    //                         }
-    //                     }
-    //                 }
-    //             }
-    //             if flag == true {
-    //                 continue;
-    //             }
-
-    //             for slot in v[0].overflow_bucket.slots.iter() {
-    //                 //println!("{} {}", slot.get_fingerprint(), fp);
-    //                 if slot.data == 0 {
-    //                     break;
-    //                 } else {
-    //                     if slot.get_fingerprint() == fp {
-    //                         let kv_pointer = slot.get_kv_pointer();
-    //                         let kv = unsafe { (*(kv_pointer as *mut KVBlockMem)).get() };
-    //                         if kv.key == key {
-    //                             println!("{:?}", Some(kv.value));
-    //                             flag = true;
-    //                             break;
-    //                         }
-    //                     }
-    //                 }
-    //             }
-    //             if flag == true {
-    //                 continue;
-    //             }
-
-    //             for slot in v[1].main_bucket.slots.iter() {
-    //                 //println!("{} {}", slot.get_fingerprint(), fp);
-    //                 if slot.data == 0 {
-    //                     break;
-    //                 } else {
-    //                     if slot.get_fingerprint() == fp {
-    //                         let kv_pointer = slot.get_kv_pointer();
-    //                         let kv = unsafe { (*(kv_pointer as *mut KVBlockMem)).get() };
-    //                         if kv.key == key {
-    //                             println!("{:?}", Some(kv.value));
-    //                             flag = true;
-    //                             break;
-    //                         }
-    //                     }
-    //                 }
-    //             }
-    //             if flag == true {
-    //                 continue;
-    //             }
-
-    //             for slot in v[1].overflow_bucket.slots.iter() {
-    //                 //println!("{} {}", slot.get_fingerprint(), fp);
-    //                 if slot.data == 0 {
-    //                     break;
-    //                 } else {
-    //                     if slot.get_fingerprint() == fp {
-    //                         let kv_pointer = slot.get_kv_pointer();
-    //                         let kv = unsafe { (*(kv_pointer as *mut KVBlockMem)).get() };
-    //                         if kv.key == key {
-    //                             println!("{:?}", Some(kv.value));
-    //                             flag = true;
-    //                             break;
-    //                         }
-    //                     }
-    //                 }
-    //             }
-    //             if flag == false {
-    //                 panic!("Not Found!");
-    //             }
-    //         }
-    //         None => panic!("Not Found!"),
-    //     }
-    // }
 
     let mut vec: Vec<*mut u8> = Vec::new();
 
