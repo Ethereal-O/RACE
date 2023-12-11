@@ -4,6 +4,7 @@ use crate::numa::mm::MemoryManager;
 use crate::race::hash::Hash;
 use crate::race::subtable::Subtable;
 use crate::utils;
+use std::f32::consts::E;
 use std::mem::size_of;
 use std::sync::atomic::AtomicU64;
 use std::sync::{Arc, Mutex};
@@ -42,16 +43,8 @@ impl Entry {
         self.set_header(local_depth, suffix);
     }
 
-    pub fn copy_from(memory_manager: Arc<Mutex<MemoryManager>>, entry: &Entry) -> *mut Self {
-        let entry_pointer = memory_manager.lock().unwrap().malloc(size_of::<Entry>());
-        if entry_pointer == std::ptr::null_mut() {
-            panic!("malloc failed");
-        }
-        unsafe {
-            (*(entry_pointer as *mut Self))
-                .set_subtable_and_localdepth(entry.get_subtable_pointer(), entry.get_local_depth());
-        }
-        entry_pointer as *mut Self
+    pub fn copy_from(&mut self, entry: &Entry) {
+        self.set_subtable_and_localdepth(entry.get_subtable_pointer(), entry.get_local_depth());
     }
 
     pub fn set(
@@ -197,7 +190,7 @@ impl Directory {
                 1,
                 0,
             );
-            (*(vec_pointer as *mut [Entry; CONFIG.max_entry_num]))[0].init(memory_manager, 1, 1);
+            (*(vec_pointer as *mut [Entry; CONFIG.max_entry_num]))[1].init(memory_manager, 1, 1);
             *(d_size_pointer as *mut usize) = 2;
             Directory {
                 d_size: d_size_pointer as *mut usize,
@@ -206,14 +199,18 @@ impl Directory {
         }
     }
 
-    pub fn double_size(&mut self, memory_manager: Arc<Mutex<MemoryManager>>) {
-        let old_size =
-            unsafe { (*(self.d_size as *mut AtomicU64)).load(std::sync::atomic::Ordering::SeqCst) };
-        for index in 0..old_size {
-            self.entries
-                .push(Entry::copy_from(memory_manager.clone(), unsafe {
-                    &(*(self.entries))[index]
-                }));
+    pub fn double_size(&mut self) {
+        let old_size = self.get_size();
+        for index in old_size..old_size * 2 {
+            let entry = self.get_entry((index - old_size) as usize);
+            let pointer = entry.get_subtable_pointer();
+            let local_depth = entry.get_local_depth();
+            self.get_entry(index as usize)
+                .set_subtable_and_localdepth(pointer, local_depth);
+        }
+        unsafe {
+            (*(self.d_size as *mut AtomicU64))
+                .store((old_size * 2) as u64, std::sync::atomic::Ordering::SeqCst);
         }
     }
 
@@ -222,7 +219,7 @@ impl Directory {
         memory_manager: Arc<Mutex<MemoryManager>>,
         need_index: usize,
     ) {
-        self.double_size(memory_manager.clone());
+        self.double_size();
         // get real old index
         let old_index = Directory::restrict_suffix_to(
             need_index as u64,
@@ -236,7 +233,8 @@ impl Directory {
     pub fn change_entry_suffix_subtable(&mut self, local_depth: u8, suffix: u64) {
         let new_pointer = self.get_entry(suffix as usize).get_subtable_pointer();
         let mut index = suffix as usize;
-        while index < self.entries.len() {
+        let old_size = self.get_size();
+        while index < old_size {
             // if Directory::restrict_suffix_to(index as u64, local_depth) == suffix {}
             self.get_entry(index)
                 .set_subtable_and_localdepth(new_pointer, local_depth);
@@ -251,7 +249,9 @@ impl Directory {
             self.get_entry(old_index).get_local_depth(),
         ) as usize;
 
-        if self.entries.len() <= new_index {
+        let old_size = self.get_size();
+
+        if old_size <= new_index {
             panic!("new_index error");
         }
 
@@ -285,8 +285,10 @@ impl Directory {
             old_index as u64,
             self.get_entry(old_index).get_local_depth(),
         ) as usize;
-        if self.entries.len() <= new_index {
-            self.double_size(memory_manager.clone());
+
+        let old_size = self.get_size();
+        if old_size <= new_index {
+            self.double_size();
         }
 
         self.split_entry(memory_manager.clone(), old_index);
@@ -316,15 +318,22 @@ impl Directory {
 
     pub fn deref_directory(&mut self) -> Vec<Entry> {
         let mut new_entries = Vec::new();
-        for entry in self.entries.iter() {
+        let old_size = self.get_size();
+        for entry in 0..old_size {
             new_entries.push(Entry {
-                data: unsafe { (*(*entry)).data },
-            });
+                data: self.get_entry(entry).data,
+            })
         }
         new_entries
     }
 
     pub fn get_entry(&mut self, index: usize) -> &mut Entry {
         unsafe { &mut (*(self.entries))[index] }
+    }
+
+    pub fn get_size(&self) -> usize {
+        unsafe {
+            (*(self.d_size as *mut AtomicU64)).load(std::sync::atomic::Ordering::SeqCst) as usize
+        }
     }
 }

@@ -45,7 +45,8 @@ fn print_slot_suffix(directory: &mut directory::Directory, dir_index: usize) {
 }
 
 fn print_all(directory: &mut directory::Directory) {
-    let dir_num = directory.entries.len();
+    print!("##########################\n");
+    let dir_num = directory.get_size();
     for i in 0..dir_num {
         print_dir_depth(directory, i);
         print_slot_depth(directory, i);
@@ -157,9 +158,9 @@ fn main() {
     // // init value
     // print_all(&mut directory);
 
-    // // rehash first subtable
-    // directory.rehash(memory_manager.clone(), 0);
-    // print_all(&mut directory);
+    // // // rehash first subtable
+    // // directory.rehash(memory_manager.clone(), 0);
+    // // print_all(&mut directory);
 
     // // rehash first subtable
     // directory.rehash(memory_manager.clone(), 0);
