@@ -7,7 +7,7 @@ use crate::utils;
 use std::f32::consts::E;
 use std::mem::size_of;
 use std::sync::atomic::AtomicU64;
-use std::sync::{Arc, Mutex};
+use std::sync::{atomic, Arc, Mutex};
 use std::vec;
 
 use super::subtable::BucketGroup;
@@ -93,14 +93,14 @@ impl Entry {
                 * (size_of::<u64>() - size_of::<u8>() - CONFIG.directory_lock_offset)) as u8
     }
 
-    pub fn set_lock(&mut self, lock: u8) {
-        self.data = (self.data
+    fn set_lock_data(data: u64, lock: u8) -> u64 {
+        (data
             & !(0xFF
                 << CONFIG.bits_of_byte
                     * (size_of::<u64>() - size_of::<u8>() - CONFIG.directory_lock_offset)))
             | ((lock as u64)
                 << CONFIG.bits_of_byte
-                    * (size_of::<u64>() - size_of::<u8>() - CONFIG.directory_lock_offset));
+                    * (size_of::<u64>() - size_of::<u8>() - CONFIG.directory_lock_offset))
     }
 
     pub fn get_local_depth(&self) -> u8 {
@@ -146,10 +146,68 @@ impl Entry {
                     * (size_of::<u64>() - size_of::<u8>() - CONFIG.directory_localdepth_offset)))
             | subtable;
     }
+
+    pub fn lock(&mut self, old_data: u64, lock: u8) -> bool {
+        let new_data = Entry::set_lock_data(old_data, lock);
+        unsafe {
+            match std::mem::transmute::<&u64, &atomic::AtomicU64>(&self.data).compare_exchange(
+                old_data,
+                new_data,
+                atomic::Ordering::SeqCst,
+                atomic::Ordering::SeqCst,
+            ) {
+                Ok(_) => true,
+                Err(_) => false,
+            }
+        }
+    }
+
+    pub fn unlock(&mut self, old_data: u64) -> bool {
+        let new_data = Entry::set_lock_data(old_data, 0);
+        unsafe {
+            match std::mem::transmute::<&u64, &atomic::AtomicU64>(&self.data).compare_exchange(
+                old_data,
+                new_data,
+                atomic::Ordering::SeqCst,
+                atomic::Ordering::SeqCst,
+            ) {
+                Ok(_) => true,
+                Err(_) => false,
+            }
+        }
+    }
+
+    pub fn initial(&mut self, data: u64) -> bool {
+        unsafe {
+            match std::mem::transmute::<&u64, &atomic::AtomicU64>(&self.data).compare_exchange(
+                0,
+                data,
+                atomic::Ordering::SeqCst,
+                atomic::Ordering::SeqCst,
+            ) {
+                Ok(_) => true,
+                Err(_) => false,
+            }
+        }
+    }
+
+    pub fn update(&mut self, old_data: u64, new_data: u64) -> bool {
+        unsafe {
+            match std::mem::transmute::<&u64, &atomic::AtomicU64>(&self.data).compare_exchange(
+                old_data,
+                new_data,
+                atomic::Ordering::SeqCst,
+                atomic::Ordering::SeqCst,
+            ) {
+                Ok(_) => true,
+                Err(_) => false,
+            }
+        }
+    }
 }
 
 pub struct Directory {
-    pub d_size: *mut usize,
+    pub global_depth: *mut usize,
     pub entries: *mut [Entry; CONFIG.max_entry_num],
 }
 
@@ -175,7 +233,7 @@ impl Directory {
     }
 
     pub fn get_subtable_index(&mut self, key: &String) -> usize {
-        unsafe { ((*(self.d_size) as u64 - 1) & Hash::hash(key, 1)) as usize }
+        unsafe { ((1 << (*(self.global_depth) as u64)) & Hash::hash(key, 1)) as usize }
     }
 
     pub fn new(memory_manager: Arc<Mutex<MemoryManager>>) -> Self {
@@ -183,7 +241,7 @@ impl Directory {
             .lock()
             .unwrap()
             .malloc(CONFIG.entry_size * CONFIG.max_entry_num);
-        let d_size_pointer = memory_manager.lock().unwrap().malloc(CONFIG.ptr_size);
+        let gd_pointer = memory_manager.lock().unwrap().malloc(CONFIG.ptr_size);
         unsafe {
             (*(vec_pointer as *mut [Entry; CONFIG.max_entry_num]))[0].init(
                 memory_manager.clone(),
@@ -191,9 +249,9 @@ impl Directory {
                 0,
             );
             (*(vec_pointer as *mut [Entry; CONFIG.max_entry_num]))[1].init(memory_manager, 1, 1);
-            *(d_size_pointer as *mut usize) = 2;
+            *(gd_pointer as *mut usize) = 1;
             Directory {
-                d_size: d_size_pointer as *mut usize,
+                global_depth: gd_pointer as *mut usize,
                 entries: vec_pointer as *mut [Entry; CONFIG.max_entry_num],
             }
         }
@@ -209,8 +267,8 @@ impl Directory {
                 .set_subtable_and_localdepth(pointer, local_depth);
         }
         unsafe {
-            (*(self.d_size as *mut AtomicU64))
-                .store((old_size * 2) as u64, std::sync::atomic::Ordering::SeqCst);
+            (*(self.global_depth as *mut AtomicU64))
+                .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
         }
     }
 
@@ -333,7 +391,33 @@ impl Directory {
 
     pub fn get_size(&self) -> usize {
         unsafe {
-            (*(self.d_size as *mut AtomicU64)).load(std::sync::atomic::Ordering::SeqCst) as usize
+            (*(self.global_depth as *mut AtomicU64)).load(std::sync::atomic::Ordering::SeqCst)
+                as usize
         }
     }
+
+    pub fn lock_entry(&mut self, index: usize, old_data: u64, lock: u8) -> bool {
+        self.get_entry(index).lock(old_data, lock)
+    }
+
+    pub fn unlock_entry(&mut self, index: usize, old_data: u64) -> bool {
+        self.get_entry(index).unlock(old_data)
+    }
+
+    pub fn write_new_entry(&mut self, index: usize, data: u64) -> bool {
+        self.get_entry(index).initial(data)
+    }
+
+    pub fn update_entry(&mut self, index: usize, old_data: u64, new_data: u64) -> bool {
+        self.get_entry(index).update(old_data, new_data)
+    }
+
+    // pub fn get_entries(&mut self) -> Vec<Entry> {
+    //     let size = 1
+    //         << unsafe {
+    //             (*(self.global_depth as *const AtomicU64)).load(std::sync::atomic::Ordering::SeqCst)
+    //                 as usize
+    //         };
+    //     let mut result = Vec::with_capacity(size);
+    // }
 }
