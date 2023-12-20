@@ -145,6 +145,40 @@ impl ComputePool {
         }
     }
 
+    fn lock_suffix_without_self(&mut self, suffix: u64, local_depth: u8) {
+        let mut index = suffix as usize;
+        index = RaceUtils::plus_bit_to_suffix(index as u64, local_depth + 1) as usize;
+        loop {
+            if index >= self.get_size() {
+                break;
+            }
+            self.lock(index);
+            index = RaceUtils::plus_bit_to_suffix(index as u64, local_depth + 1) as usize;
+        }
+    }
+
+    fn lock_suffix_helper(
+        &mut self,
+        old_index: usize,
+        new_index: usize,
+        local_depth: u8,
+        is_first: bool,
+    ) {
+        if is_first {
+            self.lock(old_index);
+            self.lock(new_index);
+        } else {
+            self.lock_suffix_without_self(old_index as u64, local_depth);
+            self.lock_suffix_without_self(new_index as u64, local_depth);
+        }
+    }
+
+    fn lock_suffix_and_flush(&mut self, old_index: usize, new_index: usize, local_depth: u8) {
+        self.lock_suffix_helper(old_index, new_index, local_depth, true);
+        self.get_directory();
+        self.lock_suffix_helper(old_index, new_index, local_depth, false);
+    }
+
     fn unlock_suffix(&mut self, suffix: u64) {
         let local_depth = self.directory.get_entry(suffix as usize).get_local_depth();
         let mut index = suffix as usize;
@@ -167,6 +201,7 @@ impl ComputePool {
             self.unlock_all();
             return;
         }
+
         // begin double size now!
         // set directory
         for index in old_size..old_size * 2 {
@@ -242,9 +277,8 @@ impl ComputePool {
         // we must get local depth first
         let old_depth = self.directory.get_entry(old_index).get_local_depth();
 
-        // lock suffix
-        self.lock_suffix(old_index as u64, old_depth + 1);
-        self.lock_suffix(new_index as u64, old_depth + 1);
+        // we must try lock and get newest global depth
+        self.lock_suffix_and_flush(old_index, new_index, old_depth + 1);
 
         // get local depth again
         let new_depth = self.directory.get_entry(old_index).get_local_depth();
