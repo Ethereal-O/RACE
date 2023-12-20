@@ -86,7 +86,7 @@ impl ComputePool {
             match result {
                 Ok(_) => return true,
                 Err(new_data) => {
-                    if RaceUtils::check_is_locked(new_data) {
+                    if is_try && RaceUtils::check_is_locked(new_data) {
                         return false;
                     }
                 }
@@ -108,8 +108,8 @@ impl ComputePool {
     }
 
     fn unlock(&mut self, index: usize) {
-        let old_data = self.directory.get_entry(index).get_data();
-        self.mempool.unlock_entry(index, old_data);
+        let locked_data = self.directory.get_entry(index).get_locked_data();
+        self.mempool.unlock_entry(index, locked_data);
     }
 
     fn lock_all(&mut self) {
@@ -134,8 +134,7 @@ impl ComputePool {
         }
     }
 
-    fn lock_suffix(&mut self, suffix: u64) {
-        let local_depth = self.directory.get_entry(suffix as usize).get_local_depth();
+    fn lock_suffix(&mut self, suffix: u64, local_depth: u8) {
         let mut index = suffix as usize;
         loop {
             self.lock(index);
@@ -244,8 +243,8 @@ impl ComputePool {
         let old_depth = self.directory.get_entry(old_index).get_local_depth();
 
         // lock suffix
-        self.lock_suffix(old_index as u64);
-        self.lock_suffix(new_index as u64);
+        self.lock_suffix(old_index as u64, old_depth + 1);
+        self.lock_suffix(new_index as u64, old_depth + 1);
 
         // get local depth again
         let new_depth = self.directory.get_entry(old_index).get_local_depth();
