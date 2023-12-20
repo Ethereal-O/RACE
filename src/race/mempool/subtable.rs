@@ -1,8 +1,8 @@
 use crate::cfg::config::CONFIG;
 use crate::numa::mm::memcpy;
 use crate::numa::mm::MemoryManager;
-use crate::race::hash::Hash;
-use crate::race::kvblock::{KVBlock, KVBlockMem};
+use crate::race::common::hash::Hash;
+use crate::race::common::kvblock::{KVBlock, KVBlockMem};
 use std::mem::size_of;
 use std::sync::{atomic, Arc, Mutex};
 

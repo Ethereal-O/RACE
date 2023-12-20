@@ -16,6 +16,7 @@ pub struct RaceConfig {
     pub directory_localdepth_offset: usize,
     pub max_entry_num: usize,
     pub entry_size: usize,
+    pub max_try_lock_times: usize,
 }
 
 pub const CONFIG: RaceConfig = RaceConfig {
@@ -36,4 +37,5 @@ pub const CONFIG: RaceConfig = RaceConfig {
     directory_localdepth_offset: 1,
     max_entry_num: 1 << 16,
     entry_size: 64,
+    max_try_lock_times: 5,
 };
