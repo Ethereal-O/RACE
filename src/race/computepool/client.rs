@@ -1,36 +1,70 @@
-use std::mem::size_of;
-
-use super::directory::{self, ComputePoolDirectory};
+use super::directory::{self, ClientDirectory};
 use crate::cfg::config::CONFIG;
 use crate::race::common::hash::{Hash, HashMethod};
 use crate::race::common::utils::RaceUtils;
+use crate::race::mempool::subtable::CombinedBucket;
 use crate::race::mempool::{self, mempool::MemPool};
+use std::mem::size_of;
+use std::sync::{Arc, Mutex, RwLock};
 
-pub struct ComputePool {
-    mempool: MemPool,
-    directory: ComputePoolDirectory,
+pub struct Client {
+    mempool: Arc<RwLock<MemPool>>,
+    directory: ClientDirectory,
 }
 
-impl ComputePool {
-    pub fn new() -> Self {
-        let mempool = MemPool::new();
-        let directory = mempool.get_directory();
-        ComputePool { mempool, directory }
+impl Client {
+    pub fn new(mempool: Arc<RwLock<MemPool>>) -> Self {
+        let directory = mempool.read().unwrap().get_directory();
+        Client { mempool, directory }
     }
 
     fn get_size(&self) -> usize {
         RaceUtils::depth_to_size(self.directory.global_depth as u8)
     }
 
-    // pub fn read(
-    //     &mut self,
-    //     key: &String,
-    // ) -> Option<String> {
-    //     let index = Hash::hash(key, HashMethod::Directory) as usize;
-    //     let hash_1 = Hash::hash(key, HashMethod::CombinedBucket1) as usize;
-    //     let hash_2 = Hash::hash(key, HashMethod::CombinedBucket2) as usize;
-    //     let combined_bucket = self.mempool.read(index, hash_1, hash_2);
-    // }
+    fn get_combined_buckets(
+        &self,
+        index: usize,
+        bucket1: usize,
+        bucket2: usize,
+    ) -> Option<[CombinedBucket; 2]> {
+        self.directory
+            .get_entry_const(index)
+            .get_combined_buckets(bucket1, bucket2)
+    }
+
+    pub fn search(&mut self, key: &String) -> Option<String> {
+        let string_to_key = Hash::hash(key, HashMethod::Directory);
+        let index = RaceUtils::restrict_suffix_to(string_to_key, self.directory.global_depth as u8)
+            as usize;
+        let hash_1 = Hash::hash(key, HashMethod::CombinedBucket1) as usize;
+        let hash_2 = Hash::hash(key, HashMethod::CombinedBucket2) as usize;
+        let fp = Hash::hash(key, HashMethod::FingerPrint) as u8;
+        match self.get_combined_buckets(index, hash_1, hash_2) {
+            Some(cbs) => {
+                let remote_local_depth = cbs[0].main_bucket.header.get_local_depth();
+                let remote_suffix = cbs[0].main_bucket.header.get_suffix();
+                let local_depth = self.directory.get_entry(index).get_local_depth();
+                let suffix = RaceUtils::restrict_suffix_to(string_to_key, remote_local_depth);
+
+                if remote_suffix == suffix {
+                    RaceUtils::check_combined_buckets(&cbs, key, fp)
+                } else {
+                    match RaceUtils::check_combined_buckets(&cbs, key, fp) {
+                        Some(v) => {
+                            self.refresh_directory();
+                            Some(v)
+                        }
+                        None => {
+                            self.refresh_directory();
+                            self.search(key)
+                        }
+                    }
+                }
+            }
+            None => None,
+        }
+    }
 
     /**
      * Inner Remote part
@@ -40,7 +74,10 @@ impl ComputePool {
             .get_entry(index as usize)
             .set_subtable_and_localdepth(pointer, local_depth);
         let locked_data = self.directory.get_entry(index as usize).get_locked_data();
-        self.mempool.write_new_entry(index, locked_data);
+        self.mempool
+            .read()
+            .unwrap()
+            .write_new_entry(index, locked_data);
     }
 
     fn set_local_entry_and_push(&mut self, index: usize, pointer: u64, local_depth: u8) {
@@ -51,6 +88,8 @@ impl ComputePool {
             .set_subtable_and_localdepth(pointer, local_depth);
         let new_locked_data = self.directory.get_entry(index as usize).get_locked_data();
         self.mempool
+            .read()
+            .unwrap()
             .update_entry(index, old_locked_data, new_locked_data);
     }
 
@@ -64,7 +103,7 @@ impl ComputePool {
     }
 
     fn refresh_directory(&mut self) {
-        self.directory = self.mempool.get_directory();
+        self.directory = self.mempool.read().unwrap().get_directory();
         self.clear_all_lock_status();
     }
 
@@ -82,7 +121,7 @@ impl ComputePool {
         let old_data = self.directory.get_entry(index).get_data();
         let try_times = 0;
         loop {
-            let result = self.mempool.try_lock_entry(index, old_data);
+            let result = self.mempool.read().unwrap().try_lock_entry(index, old_data);
             match result {
                 Ok(_) => return true,
                 Err(new_data) => {
@@ -109,7 +148,10 @@ impl ComputePool {
 
     fn unlock(&mut self, index: usize) {
         let locked_data = self.directory.get_entry(index).get_locked_data();
-        self.mempool.unlock_entry(index, locked_data);
+        self.mempool
+            .read()
+            .unwrap()
+            .unlock_entry(index, locked_data);
     }
 
     fn lock_all(&mut self) {
@@ -218,7 +260,7 @@ impl ComputePool {
 
         // set global depth
         self.directory.global_depth += 1;
-        self.mempool.increase_global_depth();
+        self.mempool.read().unwrap().increase_global_depth();
 
         // unlock all
         self.unlock_all();
@@ -240,7 +282,11 @@ impl ComputePool {
         }
 
         // create new subtable
-        let new_pointer = self.mempool.new_subtable(old_depth + 1, new_index as u64) as u64;
+        let new_pointer = self
+            .mempool
+            .read()
+            .unwrap()
+            .new_subtable(old_depth + 1, new_index as u64) as u64;
 
         // get old pointer
         let old_pointer = self.directory.get_entry(old_index).get_subtable_pointer() as u64;
@@ -250,8 +296,11 @@ impl ComputePool {
         self.set_local_entries_and_push(new_index as u64, new_pointer, old_depth + 1);
 
         // do not forget to change old subtable
-        self.mempool
-            .set_subtable_header(old_index, old_depth + 1, old_index as u64);
+        self.mempool.read().unwrap().set_subtable_header(
+            old_index,
+            old_depth + 1,
+            old_index as u64,
+        );
 
         // move items from old subtable to new subtable
         self.move_items(old_index, new_index);
@@ -298,11 +347,11 @@ impl ComputePool {
     }
 
     // only for test
-    pub fn get_mempool(&self) -> &MemPool {
+    pub fn get_mempool(&self) -> &Arc<RwLock<MemPool>> {
         &self.mempool
     }
 
-    pub fn get_directory(&self) -> &ComputePoolDirectory {
+    pub fn get_directory(&self) -> &ClientDirectory {
         &self.directory
     }
 

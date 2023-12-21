@@ -1,3 +1,4 @@
+use crate::race::mempool::subtable::CombinedBucket;
 use crate::CONFIG;
 use crate::{Bucket, KVBlockMem};
 use std::mem::size_of;
@@ -5,9 +6,9 @@ use std::mem::size_of;
 pub struct RaceUtils {}
 
 impl RaceUtils {
-    pub fn restrict_suffix_to(suffix: u64, local_depth: u8) -> u64 {
+    pub fn restrict_suffix_to(key: u64, local_depth: u8) -> u64 {
         let mask = (1 << (local_depth)) - 1;
-        suffix & mask
+        key & mask
     }
 
     pub fn add_bit_to_suffix(suffix: u64, index: u8) -> u64 {
@@ -65,7 +66,7 @@ impl RaceUtils {
         data
     }
 
-    pub fn check_bucket(bucket: &Bucket, fp: u8, key: &String) -> bool {
+    fn check_bucket(bucket: &Bucket, fp: u8, key: &String) -> Option<String> {
         for slot in bucket.slots.iter() {
             if slot.data == 0 {
                 break;
@@ -74,12 +75,28 @@ impl RaceUtils {
                     let kv_pointer = slot.get_kv_pointer();
                     let kv = unsafe { (*(kv_pointer as *mut KVBlockMem)).get() };
                     if kv.key == *key {
-                        println!("{:?}", Some(kv.value));
-                        return true;
+                        return Some(kv.value);
                     }
                 }
             }
         }
-        false
+        None
+    }
+
+    pub fn check_combined_buckets(
+        cbs: &[CombinedBucket; 2],
+        key: &String,
+        fp: u8,
+    ) -> Option<String> {
+        match RaceUtils::check_bucket(&cbs[0].main_bucket, fp, key) {
+            Some(v) => Some(v),
+            None => match RaceUtils::check_bucket(&cbs[0].overflow_bucket, fp, key) {
+                Some(v) => Some(v),
+                None => match RaceUtils::check_bucket(&cbs[1].main_bucket, fp, key) {
+                    Some(v) => Some(v),
+                    None => RaceUtils::check_bucket(&cbs[1].overflow_bucket, fp, key),
+                },
+            },
+        }
     }
 }

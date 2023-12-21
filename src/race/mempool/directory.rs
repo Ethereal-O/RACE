@@ -3,8 +3,8 @@ use crate::numa::mm::memcpy;
 use crate::numa::mm::MemoryManager;
 use crate::race::common::hash::Hash;
 use crate::race::common::utils::RaceUtils;
-use crate::race::computepool::directory::ComputePoolDirectory;
-use crate::race::computepool::directory::ComputePoolEntry;
+use crate::race::computepool::directory::ClientDirectory;
+use crate::race::computepool::directory::ClientEntry;
 use crate::race::mempool::subtable::Subtable;
 use std::f32::consts::E;
 use std::mem::size_of;
@@ -233,14 +233,14 @@ impl MemPoolDirectory {
         }
     }
 
-    pub fn set_subtable_header(&mut self, index: usize, local_depth: u8, suffix: u64) {
+    pub fn set_subtable_header(&self, index: usize, local_depth: u8, suffix: u64) {
         self.get_entry(index)
             .get_subtable()
             .set_header(local_depth, suffix);
     }
 
     pub fn set(
-        &mut self,
+        &self,
         index: usize,
         bucket_group: usize,
         bucket: usize,
@@ -252,29 +252,24 @@ impl MemPoolDirectory {
             .set(bucket_group, bucket, slot, data, old)
     }
 
-    pub fn get(
-        &mut self,
-        index: usize,
-        bucket1: usize,
-        bucket2: usize,
-    ) -> Option<[CombinedBucket; 2]> {
+    pub fn get(&self, index: usize, bucket1: usize, bucket2: usize) -> Option<[CombinedBucket; 2]> {
         self.get_entry(index).get_by_bucket_ids(bucket1, bucket2)
     }
 
-    pub fn get_directory(&self) -> ComputePoolDirectory {
-        let mut new_dir_entries = [ComputePoolEntry { data: 0 }; CONFIG.max_entry_num];
+    pub fn get_directory(&self) -> ClientDirectory {
+        let mut new_dir_entries = [ClientEntry { data: 0 }; CONFIG.max_entry_num];
         let new_global_depth = self.get_global_depth();
         let new_size = RaceUtils::depth_to_size(new_global_depth as u8);
         for index in 0..new_size {
             new_dir_entries[index].data = self.get_entry_const(index).data;
         }
-        ComputePoolDirectory {
+        ClientDirectory {
             global_depth: new_global_depth,
             entries: new_dir_entries,
         }
     }
 
-    pub fn get_entry(&mut self, index: usize) -> &mut MemPoolEntry {
+    pub fn get_entry(&self, index: usize) -> &mut MemPoolEntry {
         unsafe { &mut (*(self.entries))[index] }
     }
 
@@ -303,19 +298,19 @@ impl MemPoolDirectory {
         }
     }
 
-    pub fn try_lock_entry(&mut self, index: usize, old_data: u64, lock: u8) -> Result<u64, u64> {
+    pub fn try_lock_entry(&self, index: usize, old_data: u64, lock: u8) -> Result<u64, u64> {
         self.get_entry(index).try_lock(old_data, lock)
     }
 
-    pub fn try_unlock_entry(&mut self, index: usize, old_data: u64) -> Result<u64, u64> {
+    pub fn try_unlock_entry(&self, index: usize, old_data: u64) -> Result<u64, u64> {
         self.get_entry(index).try_unlock(old_data)
     }
 
-    pub fn write_new_entry(&mut self, index: usize, data: u64) -> bool {
+    pub fn write_new_entry(&self, index: usize, data: u64) -> bool {
         self.get_entry(index).initial(data)
     }
 
-    pub fn update_entry(&mut self, index: usize, old_data: u64, new_data: u64) -> bool {
+    pub fn update_entry(&self, index: usize, old_data: u64, new_data: u64) -> bool {
         self.get_entry(index).update(old_data, new_data)
     }
 }

@@ -1,2 +1,2 @@
-pub mod computepool;
+pub mod client;
 pub mod directory;

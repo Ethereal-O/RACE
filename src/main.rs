@@ -6,10 +6,13 @@ mod race;
 use cfg::config::CONFIG;
 use numa::mm::MemoryManager;
 use race::common::kvblock::KVBlockMem;
-use race::computepool::computepool::ComputePool;
-use race::computepool::directory::ComputePoolDirectory;
+use race::computepool::client::Client;
+use race::computepool::directory::ClientDirectory;
+use race::mempool;
+use race::mempool::mempool::MemPool;
 use race::mempool::{directory, subtable::Bucket};
 use std::mem::size_of;
+use std::sync::RwLock;
 use std::{
     ops::Deref,
     sync::{Arc, Mutex},
@@ -17,7 +20,7 @@ use std::{
 
 use crate::{numa::numa::numa_free, race::common::hash};
 
-fn print_dir_depth(directory: &ComputePool, dir_index: usize) {
+fn print_dir_depth(directory: &Client, dir_index: usize) {
     print!(
         "{} dir depth: {}\n",
         dir_index,
@@ -28,12 +31,14 @@ fn print_dir_depth(directory: &ComputePool, dir_index: usize) {
     );
 }
 
-fn print_slot_depth(directory: &ComputePool, dir_index: usize) {
+fn print_slot_depth(directory: &Client, dir_index: usize) {
     print!(
         "{} slot depth: {}\n",
         dir_index,
         directory
             .get_mempool()
+            .read()
+            .unwrap()
             .get_entry(dir_index)
             .get_subtable()
             .bucket_groups[0]
@@ -43,12 +48,14 @@ fn print_slot_depth(directory: &ComputePool, dir_index: usize) {
     );
 }
 
-fn print_slot_suffix(directory: &ComputePool, dir_index: usize) {
+fn print_slot_suffix(directory: &Client, dir_index: usize) {
     print!(
         "{} slot suffix: {}\n",
         dir_index,
         directory
             .get_mempool()
+            .read()
+            .unwrap()
             .get_entry(dir_index)
             .get_subtable()
             .bucket_groups[0]
@@ -58,7 +65,7 @@ fn print_slot_suffix(directory: &ComputePool, dir_index: usize) {
     );
 }
 
-fn print_all(directory: &ComputePool) {
+fn print_all(directory: &Client) {
     print!("##########################\n");
     let dir_num = directory.pub_get_size();
     for i in 0..dir_num {
@@ -199,39 +206,40 @@ fn test_mm() {
     // print!("{}\n", memory_manager.lock().unwrap().pages.len());
 }
 
-pub fn test_compute_pool() {
-    let mut compute_pool = ComputePool::new();
+pub fn test_client() {
+    let mempool = Arc::new(RwLock::new(MemPool::new()));
+    let mut client = Client::new(mempool.clone());
 
     // init value
-    print_all(&mut compute_pool);
+    print_all(&mut client);
 
     // // rehash first subtable
     // directory.rehash(memory_manager.clone(), 0);
     // print_all(&mut directory);
 
     // rehash first subtable
-    compute_pool.pub_rehash(0);
-    print_all(&mut compute_pool);
+    client.pub_rehash(0);
+    print_all(&mut client);
 
     // rehash second subtable
-    compute_pool.pub_rehash(1);
-    print_all(&mut compute_pool);
+    client.pub_rehash(1);
+    print_all(&mut client);
 
     // rehash third subtable
-    compute_pool.pub_rehash(2);
-    print_all(&mut compute_pool);
+    client.pub_rehash(2);
+    print_all(&mut client);
 
     // rehash third subtable
-    compute_pool.pub_rehash(2);
-    print_all(&mut compute_pool);
+    client.pub_rehash(2);
+    print_all(&mut client);
 
     // rehash first subtable
-    compute_pool.pub_rehash(0);
-    print_all(&mut compute_pool);
+    client.pub_rehash(0);
+    print_all(&mut client);
 
     // 0 1 2 3 4 1 6 3 0 1 10 3 4 1 6 3
 }
 
 fn main() {
-    test_compute_pool();
+    test_client();
 }
