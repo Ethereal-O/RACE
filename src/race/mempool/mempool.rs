@@ -7,7 +7,7 @@ use std::mem::size_of;
 use std::sync::{Arc, Mutex};
 
 use super::directory::MemPoolEntry;
-use super::subtable::Subtable;
+use super::subtable::{SlotPos, Subtable};
 pub struct MemPool {
     memory_manager: Arc<Mutex<MemoryManager>>,
     dir: MemPoolDirectory,
@@ -31,20 +31,12 @@ impl MemPool {
         self.dir.get(index, bucket1, bucket2)
     }
 
-    pub fn write_kv(&mut self, key: String, value: String) -> *const KVBlockMem {
+    pub fn write_kv(&self, key: String, value: String) -> *const KVBlockMem {
         KVBlockMem::new(&key, &value, self.memory_manager.clone())
     }
 
-    pub fn write_slot(
-        &mut self,
-        index: usize,
-        bucket_group: usize,
-        bucket: usize,
-        slot: usize,
-        data: u64,
-        old: u64,
-    ) -> bool {
-        self.dir.set(index, bucket_group, bucket, slot, data, old)
+    pub fn write_slot(&self, slot_pos: SlotPos, data: u64, old: u64) -> bool {
+        unsafe { (*(slot_pos.subtable as *mut Subtable)).set(slot_pos, data, old) }
     }
 
     pub fn write_new_entry(&self, index: usize, data: u64) -> bool {

@@ -137,32 +137,6 @@ fn print_all(directory: &Client) {
 //     }
 // }
 
-// // This function can be used to implement "Search"!
-// fn test_get(directory: &mut directory::Directory) {
-//     for i in 0..100 {
-//         let key = String::from("key") + &i.to_string();
-//         let fp = hash::Hash::hash(&key, 3) as u8;
-//         match directory.get(
-//             0, // test only
-//             hash::Hash::hash(&key, 1) as usize,
-//             hash::Hash::hash(&key, 2) as usize,
-//         ) {
-//             Some(v) => {
-//                 if !utils::check_bucket(&v[0].main_bucket, fp, &key) {
-//                     if !utils::check_bucket(&v[0].overflow_bucket, fp, &key) {
-//                         if !utils::check_bucket(&v[1].main_bucket, fp, &key) {
-//                             if !utils::check_bucket(&v[1].overflow_bucket, fp, &key) {
-//                                 panic!("Not Found!");
-//                             }
-//                         }
-//                     }
-//                 }
-//             }
-//             None => panic!("Should not be here!"),
-//         }
-//     }
-// }
-
 fn test_mm() {
     let memory_manager = Arc::new(Mutex::new(MemoryManager::new()));
 

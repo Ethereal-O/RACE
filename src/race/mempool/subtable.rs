@@ -6,6 +6,13 @@ use crate::race::common::kvblock::{KVBlock, KVBlockMem};
 use std::mem::size_of;
 use std::sync::{atomic, Arc, Mutex};
 
+pub struct SlotPos {
+    pub subtable: *const Subtable,
+    pub bucket_group: usize,
+    pub bucket: usize,
+    pub slot: usize,
+}
+
 pub struct Slot {
     pub data: u64,
 }
@@ -164,42 +171,20 @@ impl Bucket {
 }
 
 pub struct CombinedBucket {
+    pub subtable: *const Subtable,
+    pub bucket_group: usize,
     pub main_bucket: Bucket,
     pub overflow_bucket: Bucket,
 }
 
 impl CombinedBucket {
-    pub fn check_and_count(&self, key: &String, fp: u8) -> (bool, usize, u64) {
-        let mut pos = 0 as usize;
-        for slot in self.main_bucket.slots.iter() {
-            if slot.data == 0 {
-                return (false, pos, 0);
-            } else {
-                if slot.get_fingerprint() == fp {
-                    let kv_pointer = slot.get_kv_pointer();
-                    let kv = unsafe { (*(kv_pointer as *mut KVBlockMem)).get() };
-                    if kv.key == *key {
-                        return (true, pos, slot.data);
-                    }
-                }
-                pos += 1;
-            }
+    pub fn count(&self) -> usize {
+        let main_bucket_size = self.main_bucket.get_used_slot_num();
+        if main_bucket_size < CONFIG.slot_num {
+            return main_bucket_size;
+        } else {
+            return main_bucket_size + self.overflow_bucket.get_used_slot_num();
         }
-        for slot in self.overflow_bucket.slots.iter() {
-            if slot.data == 0 {
-                return (false, pos, 0);
-            } else {
-                if slot.get_fingerprint() == fp {
-                    let kv_pointer = slot.get_kv_pointer();
-                    let kv = unsafe { (*(kv_pointer as *mut KVBlockMem)).get() };
-                    if kv.key == *key {
-                        return (true, pos, slot.data);
-                    }
-                }
-                pos += 1;
-            }
-        }
-        (false, pos, 0)
     }
 }
 
@@ -237,28 +222,29 @@ pub struct Subtable {
 }
 
 impl Subtable {
-    pub fn set(
-        &mut self,
-        bucket_group: usize,
-        bucket: usize,
-        slot: usize,
-        data: u64,
-        old: u64,
-    ) -> bool {
-        self.bucket_groups[bucket_group].set(bucket, slot, data, old)
+    pub fn set(&mut self, slot_pos: SlotPos, data: u64, old: u64) -> bool {
+        self.bucket_groups[slot_pos.bucket_group].set(slot_pos.bucket, slot_pos.slot, data, old)
     }
 
-    pub fn get_by_bucket_ids(&self, bucket1: usize, bucket2: usize) -> Option<[CombinedBucket; 2]> {
-        if bucket1 >= 2 * CONFIG.bucket_group_num || bucket2 >= 2 * CONFIG.bucket_group_num {
+    pub fn get_by_bucket_group_ids(
+        &self,
+        bucket_group1: usize,
+        bucket_group2: usize,
+    ) -> Option<[CombinedBucket; 2]> {
+        if bucket_group1 >= CONFIG.bucket_group_num || bucket_group2 >= CONFIG.bucket_group_num {
             return None;
         }
         let cb1 = CombinedBucket {
-            main_bucket: self.bucket_groups[bucket1].buckets[0].clone(),
-            overflow_bucket: self.bucket_groups[bucket1].buckets[1].clone(),
+            subtable: self as *const Subtable,
+            bucket_group: bucket_group1,
+            main_bucket: self.bucket_groups[bucket_group1].buckets[0].clone(),
+            overflow_bucket: self.bucket_groups[bucket_group1].buckets[1].clone(),
         };
         let cb2 = CombinedBucket {
-            main_bucket: self.bucket_groups[bucket2].buckets[2].clone(),
-            overflow_bucket: self.bucket_groups[bucket2].buckets[1].clone(),
+            subtable: self as *const Subtable,
+            bucket_group: bucket_group2,
+            main_bucket: self.bucket_groups[bucket_group2].buckets[2].clone(),
+            overflow_bucket: self.bucket_groups[bucket_group2].buckets[1].clone(),
         };
         Some([cb1, cb2])
     }

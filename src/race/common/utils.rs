@@ -1,3 +1,4 @@
+use crate::hash::{Hash, HashMethod};
 use crate::race::mempool::subtable::CombinedBucket;
 use crate::CONFIG;
 use crate::{Bucket, KVBlockMem};
@@ -6,6 +7,11 @@ use std::mem::size_of;
 pub struct RaceUtils {}
 
 impl RaceUtils {
+    pub fn get_suffix(key: &String, depth: u8) -> u64 {
+        let hash_key = Hash::hash(key, HashMethod::Directory);
+        let mask = (1 << (depth)) - 1;
+        hash_key & mask
+    }
     pub fn restrict_suffix_to(key: u64, local_depth: u8) -> u64 {
         let mask = (1 << (local_depth)) - 1;
         key & mask
@@ -37,7 +43,12 @@ impl RaceUtils {
         )
     }
 
-    pub fn set_data(fp: u8, len: u8, ptr: u64) -> u64 {
+    pub fn set_data(key: &String, val: &String, ptr: u64) -> u64 {
+        let fp = Hash::hash(&key, HashMethod::FingerPrint) as u8;
+        let mut len = size_of::<KVBlockMem>() + key.len() + val.len();
+        if len > u8::MAX as usize {
+            assert!(true, "size of kv is too big");
+        }
         let mut data = 0 as u64;
         data = (data
             & (0xFF
@@ -83,11 +94,9 @@ impl RaceUtils {
         None
     }
 
-    pub fn check_combined_buckets(
-        cbs: &[CombinedBucket; 2],
-        key: &String,
-        fp: u8,
-    ) -> Option<String> {
+    pub fn check_combined_buckets(cbs: &[CombinedBucket; 2], key: &String) -> Option<String> {
+        let string_to_key = Hash::hash(key, HashMethod::Directory);
+        let fp = Hash::hash(key, HashMethod::FingerPrint) as u8;
         match RaceUtils::check_bucket(&cbs[0].main_bucket, fp, key) {
             Some(v) => Some(v),
             None => match RaceUtils::check_bucket(&cbs[0].overflow_bucket, fp, key) {

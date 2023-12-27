@@ -81,21 +81,27 @@ impl ClientEntry {
 
     pub fn get_combined_buckets(
         &self,
-        bucket1: usize,
-        bucket2: usize,
+        bucket_group1: usize,
+        bucket_group2: usize,
     ) -> Option<[CombinedBucket; 2]> {
-        if bucket1 >= 2 * CONFIG.bucket_group_num || bucket2 >= 2 * CONFIG.bucket_group_num {
+        if bucket_group1 >= CONFIG.bucket_group_num || bucket_group2 >= CONFIG.bucket_group_num {
             return None;
         }
         let subtable_pointer = self.get_subtable_pointer() as *const Subtable;
         unsafe {
             let cb1 = CombinedBucket {
-                main_bucket: (*subtable_pointer).bucket_groups[bucket1].buckets[0].clone(),
-                overflow_bucket: (*subtable_pointer).bucket_groups[bucket1].buckets[1].clone(),
+                subtable: subtable_pointer,
+                bucket_group: bucket_group1,
+                main_bucket: (*subtable_pointer).bucket_groups[bucket_group1].buckets[0].clone(),
+                overflow_bucket: (*subtable_pointer).bucket_groups[bucket_group1].buckets[1]
+                    .clone(),
             };
             let cb2 = CombinedBucket {
-                main_bucket: (*subtable_pointer).bucket_groups[bucket2].buckets[2].clone(),
-                overflow_bucket: (*subtable_pointer).bucket_groups[bucket2].buckets[1].clone(),
+                subtable: subtable_pointer,
+                bucket_group: bucket_group2,
+                main_bucket: (*subtable_pointer).bucket_groups[bucket_group2].buckets[2].clone(),
+                overflow_bucket: (*subtable_pointer).bucket_groups[bucket_group2].buckets[1]
+                    .clone(),
             };
             Some([cb1, cb2])
         }

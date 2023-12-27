@@ -49,20 +49,13 @@ impl MemPoolEntry {
         self.set_subtable_and_localdepth(entry.get_subtable_pointer(), entry.get_local_depth());
     }
 
-    pub fn set(
-        &mut self,
-        bucket_group: usize,
-        bucket: usize,
-        slot: usize,
-        data: u64,
-        old: u64,
-    ) -> bool {
+    pub fn get_by_bucket_group_ids(
+        &self,
+        bucket_group1: usize,
+        bucket_group2: usize,
+    ) -> Option<[CombinedBucket; 2]> {
         self.get_subtable()
-            .set(bucket_group, bucket, slot, data, old)
-    }
-
-    pub fn get_by_bucket_ids(&self, bucket1: usize, bucket2: usize) -> Option<[CombinedBucket; 2]> {
-        self.get_subtable().get_by_bucket_ids(bucket1, bucket2)
+            .get_by_bucket_group_ids(bucket_group1, bucket_group2)
     }
 
     pub fn set_subtable_and_localdepth(&mut self, subtable: u64, local_depth: u8) {
@@ -239,21 +232,14 @@ impl MemPoolDirectory {
             .set_header(local_depth, suffix);
     }
 
-    pub fn set(
+    pub fn get(
         &self,
         index: usize,
-        bucket_group: usize,
-        bucket: usize,
-        slot: usize,
-        data: u64,
-        old: u64,
-    ) -> bool {
+        bucket_group1: usize,
+        bucket_group2: usize,
+    ) -> Option<[CombinedBucket; 2]> {
         self.get_entry(index)
-            .set(bucket_group, bucket, slot, data, old)
-    }
-
-    pub fn get(&self, index: usize, bucket1: usize, bucket2: usize) -> Option<[CombinedBucket; 2]> {
-        self.get_entry(index).get_by_bucket_ids(bucket1, bucket2)
+            .get_by_bucket_group_ids(bucket_group1, bucket_group2)
     }
 
     pub fn get_directory(&self) -> ClientDirectory {

@@ -2,8 +2,9 @@ use super::directory::{self, ClientDirectory};
 use crate::cfg::config::CONFIG;
 use crate::race::common::hash::{Hash, HashMethod};
 use crate::race::common::utils::RaceUtils;
-use crate::race::mempool::subtable::CombinedBucket;
+use crate::race::mempool::subtable::{CombinedBucket, SlotPos};
 use crate::race::mempool::{self, mempool::MemPool};
+use crate::KVBlockMem;
 use std::mem::size_of;
 use std::sync::{Arc, Mutex, RwLock};
 
@@ -22,35 +23,67 @@ impl Client {
         RaceUtils::depth_to_size(self.directory.global_depth as u8)
     }
 
-    fn get_combined_buckets(
-        &self,
-        index: usize,
-        bucket1: usize,
-        bucket2: usize,
-    ) -> Option<[CombinedBucket; 2]> {
+    fn get_combined_buckets(&self, key: &String) -> Option<[CombinedBucket; 2]> {
+        let index = RaceUtils::get_suffix(key, self.directory.global_depth as u8) as usize;
+        let hash_1 = Hash::hash(key, HashMethod::CombinedBucket1) as usize;
+        let hash_2 = Hash::hash(key, HashMethod::CombinedBucket2) as usize;
         self.directory
             .get_entry_const(index)
-            .get_combined_buckets(bucket1, bucket2)
+            .get_combined_buckets(hash_1, hash_2)
+    }
+
+    fn get_slot(&self, key: &String) -> Option<SlotPos> {
+        match self.get_combined_buckets(key) {
+            Some(cbs) => {
+                if RaceUtils::check_combined_buckets(&cbs, key).is_some() {
+                    return None;
+                }
+                let cb1_count = cbs[0].count();
+                let cb2_count = cbs[1].count();
+                if cb1_count < cb2_count {
+                    Some(SlotPos {
+                        subtable: cbs[0].subtable,
+                        bucket_group: cbs[0].bucket_group,
+                        bucket: if cb1_count < CONFIG.slot_num { 0 } else { 1 },
+                        slot: cb1_count % CONFIG.slot_num,
+                    })
+                } else if cb1_count > cb2_count {
+                    Some(SlotPos {
+                        subtable: cbs[1].subtable,
+                        bucket_group: cbs[1].bucket_group,
+                        bucket: if cb2_count < CONFIG.slot_num { 2 } else { 1 },
+                        slot: cb2_count % CONFIG.slot_num,
+                    })
+                } else {
+                    if cb1_count == 2 * CONFIG.slot_num {
+                        None
+                    } else {
+                        Some(SlotPos {
+                            subtable: cbs[0].subtable,
+                            bucket_group: cbs[0].bucket_group,
+                            bucket: if cb1_count < CONFIG.slot_num { 0 } else { 1 },
+                            slot: cb1_count % CONFIG.slot_num,
+                        })
+                    }
+                }
+            }
+            None => panic!("metadata error"),
+        }
     }
 
     pub fn search(&mut self, key: &String) -> Option<String> {
-        let string_to_key = Hash::hash(key, HashMethod::Directory);
-        let index = RaceUtils::restrict_suffix_to(string_to_key, self.directory.global_depth as u8)
-            as usize;
-        let hash_1 = Hash::hash(key, HashMethod::CombinedBucket1) as usize;
-        let hash_2 = Hash::hash(key, HashMethod::CombinedBucket2) as usize;
-        let fp = Hash::hash(key, HashMethod::FingerPrint) as u8;
-        match self.get_combined_buckets(index, hash_1, hash_2) {
+        match self.get_combined_buckets(key) {
             Some(cbs) => {
-                let remote_local_depth = cbs[0].main_bucket.header.get_local_depth();
-                let remote_suffix = cbs[0].main_bucket.header.get_suffix();
-                let local_depth = self.directory.get_entry(index).get_local_depth();
-                let suffix = RaceUtils::restrict_suffix_to(string_to_key, remote_local_depth);
-
-                if remote_suffix == suffix {
-                    RaceUtils::check_combined_buckets(&cbs, key, fp)
+                let remote_local_depth1 = cbs[0].main_bucket.header.get_local_depth();
+                let remote_suffix1 = cbs[0].main_bucket.header.get_suffix();
+                let suffix1 = RaceUtils::get_suffix(key, remote_local_depth1);
+                let remote_local_depth2 = cbs[1].main_bucket.header.get_local_depth();
+                let remote_suffix2 = cbs[1].main_bucket.header.get_suffix();
+                let suffix2 = RaceUtils::get_suffix(key, remote_local_depth2);
+                if remote_suffix1 == suffix1 && remote_suffix2 == suffix2 {
+                    RaceUtils::check_combined_buckets(&cbs, key)
                 } else {
-                    match RaceUtils::check_combined_buckets(&cbs, key, fp) {
+                    match RaceUtils::check_combined_buckets(&cbs, key) {
                         Some(v) => {
                             self.refresh_directory();
                             Some(v)
@@ -63,6 +96,34 @@ impl Client {
                 }
             }
             None => None,
+        }
+    }
+
+    pub fn insert(&mut self, key: &String, val: &String) -> bool {
+        match self.search(key) {
+            Some(_) => false,
+            None => {
+                let kv_block = self
+                    .mempool
+                    .read()
+                    .unwrap()
+                    .write_kv(key.clone(), val.clone());
+                let data = RaceUtils::set_data(key, val, kv_block as u64);
+                match self.get_slot(key) {
+                    Some(sp) => {
+                        if self.mempool.read().unwrap().write_slot(sp, data, 0) {
+                            // TODO: re-check
+                            true
+                        } else {
+                            self.insert(key, val)
+                        }
+                    }
+                    None => {
+                        // TODO: resizing
+                        true
+                    }
+                }
+            }
         }
     }
 
