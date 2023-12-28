@@ -35,7 +35,7 @@ impl MemPool {
         KVBlockMem::new(&key, &value, self.memory_manager.clone())
     }
 
-    pub fn write_slot(&self, slot_pos: SlotPos, data: u64, old: u64) -> bool {
+    pub fn write_slot(&self, slot_pos: &SlotPos, data: u64, old: u64) -> bool {
         unsafe { (*(slot_pos.subtable as *mut Subtable)).set(slot_pos, data, old) }
     }
 

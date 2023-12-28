@@ -1,5 +1,5 @@
 use crate::hash::{Hash, HashMethod};
-use crate::race::mempool::subtable::CombinedBucket;
+use crate::race::mempool::subtable::{CombinedBucket, SlotPos};
 use crate::CONFIG;
 use crate::{Bucket, KVBlockMem};
 use std::mem::size_of;

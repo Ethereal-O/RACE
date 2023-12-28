@@ -45,6 +45,11 @@ impl Client {
                         subtable: cbs[0].subtable,
                         bucket_group: cbs[0].bucket_group,
                         bucket: if cb1_count < CONFIG.slot_num { 0 } else { 1 },
+                        header: if cb1_count < CONFIG.slot_num {
+                            cbs[0].main_bucket.get_header()
+                        } else {
+                            cbs[0].overflow_bucket.get_header()
+                        },
                         slot: cb1_count % CONFIG.slot_num,
                     })
                 } else if cb1_count > cb2_count {
@@ -52,6 +57,11 @@ impl Client {
                         subtable: cbs[1].subtable,
                         bucket_group: cbs[1].bucket_group,
                         bucket: if cb2_count < CONFIG.slot_num { 2 } else { 1 },
+                        header: if cb2_count < CONFIG.slot_num {
+                            cbs[1].main_bucket.get_header()
+                        } else {
+                            cbs[1].overflow_bucket.get_header()
+                        },
                         slot: cb2_count % CONFIG.slot_num,
                     })
                 } else {
@@ -62,12 +72,40 @@ impl Client {
                             subtable: cbs[0].subtable,
                             bucket_group: cbs[0].bucket_group,
                             bucket: if cb1_count < CONFIG.slot_num { 0 } else { 1 },
+                            header: if cb1_count < CONFIG.slot_num {
+                                cbs[0].main_bucket.get_header()
+                            } else {
+                                cbs[0].overflow_bucket.get_header()
+                            },
                             slot: cb1_count % CONFIG.slot_num,
                         })
                     }
                 }
             }
             None => panic!("metadata error"),
+        }
+    }
+
+    fn write_slot(&mut self, slot_pos: &SlotPos, key: &String, val: &String, ptr: u64) -> bool {
+        let data = RaceUtils::set_data(key, val, ptr);
+        if self.mempool.read().unwrap().write_slot(&slot_pos, data, 0) {
+            // Reread and check whether the insert is correct
+            let current_header = unsafe {
+                (*(slot_pos.subtable))
+                    .get_bucket_header_atomic(slot_pos.bucket_group, slot_pos.bucket)
+            };
+            if current_header.get_data() == slot_pos.header
+                || RaceUtils::get_suffix(key, current_header.get_local_depth())
+                    == current_header.get_suffix()
+            {
+                true
+            } else {
+                // Insert during resizing, delete the wrong insertion and reinsert
+                self.mempool.read().unwrap().write_slot(&slot_pos, 0, data);
+                self.insert(key, val)
+            }
+        } else {
+            self.insert(key, val)
         }
     }
 
@@ -108,16 +146,8 @@ impl Client {
                     .read()
                     .unwrap()
                     .write_kv(key.clone(), val.clone());
-                let data = RaceUtils::set_data(key, val, kv_block as u64);
                 match self.get_slot(key) {
-                    Some(sp) => {
-                        if self.mempool.read().unwrap().write_slot(sp, data, 0) {
-                            // TODO: re-check
-                            true
-                        } else {
-                            self.insert(key, val)
-                        }
-                    }
+                    Some(sp) => self.write_slot(&sp, key, val, kv_block as u64),
                     None => {
                         // TODO: resizing
                         true

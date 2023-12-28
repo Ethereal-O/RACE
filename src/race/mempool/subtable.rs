@@ -3,6 +3,7 @@ use crate::numa::mm::memcpy;
 use crate::numa::mm::MemoryManager;
 use crate::race::common::hash::Hash;
 use crate::race::common::kvblock::{KVBlock, KVBlockMem};
+use std::clone;
 use std::mem::size_of;
 use std::sync::{atomic, Arc, Mutex};
 
@@ -10,6 +11,7 @@ pub struct SlotPos {
     pub subtable: *const Subtable,
     pub bucket_group: usize,
     pub bucket: usize,
+    pub header: u64,
     pub slot: usize,
 }
 
@@ -87,9 +89,20 @@ impl Slot {
     }
 }
 
-#[derive(Clone)]
+//#[derive(Clone)]
 pub struct Header {
     pub data: u64,
+}
+
+impl Clone for Header {
+    fn clone(&self) -> Self {
+        Header {
+            data: unsafe {
+                std::mem::transmute::<&u64, &atomic::AtomicU64>(&self.data)
+                    .load(atomic::Ordering::SeqCst)
+            },
+        }
+    }
 }
 
 impl Header {
@@ -125,8 +138,13 @@ impl Header {
                     * (size_of::<u64>() - size_of::<u8>() - CONFIG.header_local_depth_offset)))
             | suffix;
     }
+
+    pub fn get_data(&self) -> u64 {
+        self.data
+    }
 }
 
+#[derive(Clone)]
 pub struct Bucket {
     pub header: Header,
     pub slots: [Slot; CONFIG.slot_num],
@@ -157,16 +175,17 @@ impl Bucket {
         None
     }
 
+    pub fn get_header(&self) -> u64 {
+        self.header.get_data()
+    }
+
+    pub fn get_header_atomic(&self) -> Header {
+        self.header.clone()
+    }
+
     pub fn set_header(&mut self, local_depth: u8, suffix: u64) {
         self.header.set_local_depth(local_depth);
         self.header.set_suffix(suffix);
-    }
-
-    pub fn clone(&self) -> Bucket {
-        Bucket {
-            header: self.header.clone(),
-            slots: self.slots.clone(),
-        }
     }
 }
 
@@ -222,7 +241,7 @@ pub struct Subtable {
 }
 
 impl Subtable {
-    pub fn set(&mut self, slot_pos: SlotPos, data: u64, old: u64) -> bool {
+    pub fn set(&mut self, slot_pos: &SlotPos, data: u64, old: u64) -> bool {
         self.bucket_groups[slot_pos.bucket_group].set(slot_pos.bucket, slot_pos.slot, data, old)
     }
 
@@ -253,5 +272,9 @@ impl Subtable {
         for bucket_group in self.bucket_groups.iter_mut() {
             bucket_group.set_header(local_depth, suffix);
         }
+    }
+
+    pub fn get_bucket_header_atomic(&self, bucket_group: usize, bucket: usize) -> Header {
+        self.bucket_groups[bucket_group].buckets[bucket].get_header_atomic()
     }
 }
