@@ -76,36 +76,4 @@ impl RaceUtils {
                     * (size_of::<u64>() - size_of::<u8>() - CONFIG.slot_len_offset));
         data
     }
-
-    fn check_bucket(bucket: &Bucket, fp: u8, key: &String) -> Option<String> {
-        for slot in bucket.slots.iter() {
-            if slot.data == 0 {
-                break;
-            } else {
-                if slot.get_fingerprint() == fp {
-                    let kv_pointer = slot.get_kv_pointer();
-                    let kv = unsafe { (*(kv_pointer as *mut KVBlockMem)).get() };
-                    if kv.key == *key {
-                        return Some(kv.value);
-                    }
-                }
-            }
-        }
-        None
-    }
-
-    pub fn check_combined_buckets(cbs: &[CombinedBucket; 2], key: &String) -> Option<String> {
-        let string_to_key = Hash::hash(key, HashMethod::Directory);
-        let fp = Hash::hash(key, HashMethod::FingerPrint) as u8;
-        match RaceUtils::check_bucket(&cbs[0].main_bucket, fp, key) {
-            Some(v) => Some(v),
-            None => match RaceUtils::check_bucket(&cbs[0].overflow_bucket, fp, key) {
-                Some(v) => Some(v),
-                None => match RaceUtils::check_bucket(&cbs[1].main_bucket, fp, key) {
-                    Some(v) => Some(v),
-                    None => RaceUtils::check_bucket(&cbs[1].overflow_bucket, fp, key),
-                },
-            },
-        }
-    }
 }

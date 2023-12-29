@@ -146,11 +146,11 @@ impl MemoryManager {
         }
     }
 
-    pub fn insert(&mut self, ptr: *mut u8, mut size: usize) {
+    pub fn insert(&mut self, ptr: *const u8, mut size: usize) {
         size = (size & (!(CONFIG.align_bytes - 1)))
             + ((size & (CONFIG.align_bytes - 1)) != 0) as usize * CONFIG.align_bytes;
         for page in self.pages.iter_mut() {
-            if page.start_ptr <= ptr
+            if page.start_ptr as *const u8 <= ptr
                 && ptr < unsafe { page.start_ptr.offset(page.tot_size as isize) }
             {
                 if CONFIG.enable_mm_debug {
@@ -168,7 +168,7 @@ impl MemoryManager {
                     }
 
                     page.free_list = Some(Arc::new(Mutex::new(Free {
-                        ptr,
+                        ptr: ptr as *mut u8,
                         size,
                         next: None,
                     })));
@@ -180,7 +180,7 @@ impl MemoryManager {
                 let mut free = free_list.unwrap().clone();
                 let mut prev = free.clone();
                 let mut is_head = true;
-                while free.lock().unwrap().ptr < ptr {
+                while (free.lock().unwrap().ptr as *const u8) < ptr {
                     is_head = false;
                     prev = free.clone();
                     if free.lock().unwrap().next.is_none() {
@@ -213,7 +213,7 @@ impl MemoryManager {
                 if is_head {
                     let new_next = free.clone();
                     let new_free = Arc::new(Mutex::new(Free {
-                        ptr,
+                        ptr: ptr as *mut u8,
                         size,
                         next: Some(new_next),
                     }));
@@ -221,7 +221,7 @@ impl MemoryManager {
                 } else {
                     let new_next = prev.lock().unwrap().next.clone();
                     let new_free = Arc::new(Mutex::new(Free {
-                        ptr,
+                        ptr: ptr as *mut u8,
                         size,
                         next: new_next,
                     }));
@@ -247,7 +247,7 @@ impl MemoryManager {
         ptr.unwrap()
     }
 
-    pub fn free(&mut self, ptr: *mut u8, size: usize) {
+    pub fn free(&mut self, ptr: *const u8, size: usize) {
         self.insert(ptr, size);
     }
 }

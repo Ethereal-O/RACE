@@ -35,7 +35,14 @@ impl Client {
     fn get_slot(&self, key: &String) -> Option<SlotPos> {
         match self.get_combined_buckets(key) {
             Some(cbs) => {
-                if RaceUtils::check_combined_buckets(&cbs, key).is_some() {
+                let mut result = None;
+                for i in 0..2 {
+                    if let Some(v) = cbs[i].get_by_key(key) {
+                        result = Some(v);
+                        break;
+                    }
+                }
+                if result.is_some() {
                     return None;
                 }
                 let cb1_count = cbs[0].count();
@@ -86,8 +93,14 @@ impl Client {
         }
     }
 
-    fn write_slot(&mut self, slot_pos: &SlotPos, key: &String, val: &String, ptr: u64) -> bool {
-        let data = RaceUtils::set_data(key, val, ptr);
+    fn write_slot(
+        &mut self,
+        slot_pos: &SlotPos,
+        key: &String,
+        val: &String,
+        kv_block: *const KVBlockMem,
+    ) -> bool {
+        let data = RaceUtils::set_data(key, val, kv_block as u64);
         if self.mempool.read().unwrap().write_slot(&slot_pos, data, 0) {
             // Reread and check whether the insert is correct
             let current_header = unsafe {
@@ -109,51 +122,94 @@ impl Client {
         }
     }
 
+    fn _search(&mut self, key: &String, cbs: &[CombinedBucket; 2]) -> Option<String> {
+        let remote_local_depth1 = cbs[0].main_bucket.header.get_local_depth();
+        let remote_suffix1 = cbs[0].main_bucket.header.get_suffix();
+        let suffix1 = RaceUtils::get_suffix(key, remote_local_depth1);
+        let remote_local_depth2 = cbs[1].main_bucket.header.get_local_depth();
+        let remote_suffix2 = cbs[1].main_bucket.header.get_suffix();
+        let suffix2 = RaceUtils::get_suffix(key, remote_local_depth2);
+
+        let mut result = None;
+        for i in 0..2 {
+            if let Some(v) = cbs[i].get_by_key(key) {
+                result = Some(v);
+                break;
+            }
+        }
+        if remote_suffix1 == suffix1 && remote_suffix2 == suffix2 {
+            result
+        } else {
+            self.refresh_directory();
+            if result.is_some() {
+                result
+            } else {
+                self.search(key)
+            }
+        }
+    }
+
     pub fn search(&mut self, key: &String) -> Option<String> {
         match self.get_combined_buckets(key) {
-            Some(cbs) => {
-                let remote_local_depth1 = cbs[0].main_bucket.header.get_local_depth();
-                let remote_suffix1 = cbs[0].main_bucket.header.get_suffix();
-                let suffix1 = RaceUtils::get_suffix(key, remote_local_depth1);
-                let remote_local_depth2 = cbs[1].main_bucket.header.get_local_depth();
-                let remote_suffix2 = cbs[1].main_bucket.header.get_suffix();
-                let suffix2 = RaceUtils::get_suffix(key, remote_local_depth2);
-                if remote_suffix1 == suffix1 && remote_suffix2 == suffix2 {
-                    RaceUtils::check_combined_buckets(&cbs, key)
-                } else {
-                    match RaceUtils::check_combined_buckets(&cbs, key) {
-                        Some(v) => {
-                            self.refresh_directory();
-                            Some(v)
-                        }
-                        None => {
-                            self.refresh_directory();
-                            self.search(key)
-                        }
-                    }
-                }
-            }
+            Some(cbs) => self._search(key, &cbs),
             None => None,
         }
     }
 
-    pub fn insert(&mut self, key: &String, val: &String) -> bool {
-        match self.search(key) {
-            Some(_) => false,
-            None => {
-                let kv_block = self
-                    .mempool
-                    .read()
-                    .unwrap()
-                    .write_kv(key.clone(), val.clone());
-                match self.get_slot(key) {
-                    Some(sp) => self.write_slot(&sp, key, val, kv_block as u64),
+    fn _insert(&mut self, key: &String, val: &String, kv_block: *const KVBlockMem) -> bool {
+        match self.get_combined_buckets(key) {
+            Some(cbs) => match self._search(key, &cbs) {
+                Some(_) => false,
+                None => match self.get_slot(key) {
+                    Some(sp) => self.write_slot(&sp, key, val, kv_block),
                     None => {
-                        // TODO: resizing
-                        true
+                        self.rehash(
+                            RaceUtils::get_suffix(key, self.directory.global_depth) as usize
+                        );
+                        self._insert(key, val, kv_block)
+                    }
+                },
+            },
+            None => panic!("get candidate postion error"),
+        }
+    }
+
+    pub fn insert(&mut self, key: &String, val: &String) -> bool {
+        let kv_block = self
+            .mempool
+            .read()
+            .unwrap()
+            .write_kv(key.clone(), val.clone());
+        if self._insert(key, val, kv_block) {
+            true
+        } else {
+            self.mempool
+                .read()
+                .unwrap()
+                .free_kv(kv_block, size_of::<KVBlockMem>() + key.len() + val.len());
+            false
+        }
+    }
+
+    // TODO: consider deleting during concurrent resizing
+    pub fn delete(&mut self, key: &String) -> bool {
+        match self.get_combined_buckets(key) {
+            Some(cbs) => {
+                let mut op_spkp = None;
+                for i in 0..2 {
+                    op_spkp = cbs[i].get_slot_pos_and_data(key, i);
+                    if op_spkp.is_some() {
+                        break;
                     }
                 }
+                if let Some(spkp) = op_spkp {
+                    self.mempool.read().unwrap().write_slot(&spkp.0, 0, spkp.1);
+                    true
+                } else {
+                    false
+                }
             }
+            None => panic!("get candidate position error"),
         }
     }
 

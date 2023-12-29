@@ -109,7 +109,7 @@ impl ClientEntry {
 }
 
 pub struct ClientDirectory {
-    pub global_depth: usize,
+    pub global_depth: u8,
     pub entries: [ClientEntry; CONFIG.max_entry_num],
 }
 

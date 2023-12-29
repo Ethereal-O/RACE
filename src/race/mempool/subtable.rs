@@ -1,8 +1,8 @@
 use crate::cfg::config::CONFIG;
 use crate::numa::mm::memcpy;
 use crate::numa::mm::MemoryManager;
-use crate::race::common::hash::Hash;
-use crate::race::common::kvblock::{KVBlock, KVBlockMem};
+use crate::race::common::hash::{Hash, HashMethod};
+use crate::race::common::kvblock::KVBlockMem;
 use std::clone;
 use std::mem::size_of;
 use std::sync::{atomic, Arc, Mutex};
@@ -57,19 +57,18 @@ impl Slot {
             as u8
     }
 
-    pub fn get_kv(&self) -> KVBlock {
-        let kv_pointer = self.get_kv_pointer();
-        unsafe { (*(kv_pointer as *mut KVBlockMem)).get() }
-    }
-
-    pub fn get_by_key(&self, key: &String) -> Option<String> {
+    pub fn get_by_key(&self, key: &String, fp: u8) -> Option<String> {
         if self.get_length() == 0 {
             return None;
         }
-        let kv_pointer = self.get_kv_pointer();
-        let kv = unsafe { (*(kv_pointer as *mut KVBlockMem)).get() };
-        if kv.key == *key {
-            return Some(kv.value);
+        if self.get_fingerprint() == fp {
+            let kv_pointer = self.get_kv_pointer();
+            let op_kv = unsafe { (*(kv_pointer as *mut KVBlockMem)).get() };
+            if let Some(kv) = op_kv {
+                if kv.key == *key {
+                    return Some(kv.value);
+                }
+            }
         }
         return None;
     }
@@ -78,18 +77,22 @@ impl Slot {
         self.get_length() == 0
     }
 
-    pub fn get_kv_pointer(&self) -> u64 {
+    pub fn get_kv_pointer(&self) -> *const KVBlockMem {
         (self.data
             & !(0xFF
                 << CONFIG.bits_of_byte
                     * (size_of::<u64>() - size_of::<u8>() - CONFIG.slot_fp_offset))
             & !(0xFF
                 << CONFIG.bits_of_byte
-                    * (size_of::<u64>() - size_of::<u8>() - CONFIG.slot_len_offset))) as u64
+                    * (size_of::<u64>() - size_of::<u8>() - CONFIG.slot_len_offset)))
+            as *const KVBlockMem
+    }
+
+    pub fn get_data(&self) -> u64 {
+        self.data
     }
 }
 
-//#[derive(Clone)]
 pub struct Header {
     pub data: u64,
 }
@@ -165,12 +168,22 @@ impl Bucket {
         self.slots[slot].compare_and_swap(data, old)
     }
 
-    pub fn get_by_key(&self, key: &String) -> Option<String> {
+    pub fn get_by_key(&self, key: &String, fp: u8) -> Option<String> {
         for slot in self.slots.iter() {
-            let value = slot.get_by_key(key);
-            if value.is_some() {
-                return value;
+            if let Some(v) = slot.get_by_key(key, fp) {
+                return Some(v);
             }
+        }
+        None
+    }
+
+    pub fn get_slot_and_data(&self, key: &String, fp: u8) -> Option<(usize, u64)> {
+        let mut i = 0;
+        for slot in self.slots.iter() {
+            if let Some(v) = slot.get_by_key(key, fp) {
+                return Some((i, slot.get_data()));
+            }
+            i += 1;
         }
         None
     }
@@ -205,6 +218,52 @@ impl CombinedBucket {
             return main_bucket_size + self.overflow_bucket.get_used_slot_num();
         }
     }
+
+    pub fn get_by_key(&self, key: &String) -> Option<String> {
+        let string_to_key = Hash::hash(key, HashMethod::Directory);
+        let fp = Hash::hash(key, HashMethod::FingerPrint) as u8;
+        match self.main_bucket.get_by_key(key, fp) {
+            Some(v) => Some(v),
+            None => match self.overflow_bucket.get_by_key(key, fp) {
+                Some(v) => Some(v),
+                None => None,
+            },
+        }
+    }
+
+    pub fn get_slot_pos_and_data(&self, key: &String, hash_type: usize) -> Option<(SlotPos, u64)> {
+        let string_to_key = Hash::hash(key, HashMethod::Directory);
+        let fp = Hash::hash(key, HashMethod::FingerPrint) as u8;
+        match self.main_bucket.get_slot_and_data(key, fp) {
+            Some(sd) => {
+                return Some((
+                    SlotPos {
+                        subtable: self.subtable,
+                        bucket_group: self.bucket_group,
+                        bucket: hash_type * 2,
+                        header: self.main_bucket.get_header(),
+                        slot: sd.0,
+                    },
+                    sd.1,
+                ))
+            }
+            None => match self.overflow_bucket.get_slot_and_data(key, fp) {
+                Some(sd) => {
+                    return Some((
+                        SlotPos {
+                            subtable: self.subtable,
+                            bucket_group: self.bucket_group,
+                            bucket: 1,
+                            header: self.overflow_bucket.get_header(),
+                            slot: sd.0,
+                        },
+                        sd.1,
+                    ))
+                }
+                None => None,
+            },
+        }
+    }
 }
 
 pub struct BucketGroup {
@@ -214,19 +273,6 @@ pub struct BucketGroup {
 impl BucketGroup {
     pub fn set(&mut self, bucket: usize, slot: usize, data: u64, old: u64) -> bool {
         self.buckets[bucket].set(slot, data, old)
-    }
-
-    pub fn get_by_key(&self, key: &String, method: u8) -> Option<String> {
-        let mut value = None;
-        match method {
-            1 => value = self.buckets[0].get_by_key(key),
-            2 => value = self.buckets[2].get_by_key(key),
-            _ => panic!("method error"),
-        }
-        if value.is_none() {
-            value = self.buckets[1].get_by_key(key);
-        }
-        value
     }
 
     pub fn set_header(&mut self, local_depth: u8, suffix: u64) {

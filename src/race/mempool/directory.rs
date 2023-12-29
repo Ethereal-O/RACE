@@ -8,7 +8,7 @@ use crate::race::computepool::directory::ClientEntry;
 use crate::race::mempool::subtable::Subtable;
 use std::f32::consts::E;
 use std::mem::size_of;
-use std::sync::atomic::AtomicU64;
+use std::sync::atomic::AtomicU8;
 use std::sync::{atomic, Arc, Mutex};
 use std::vec;
 
@@ -196,7 +196,7 @@ impl MemPoolEntry {
 }
 
 pub struct MemPoolDirectory {
-    pub global_depth: *mut usize,
+    pub global_depth: *mut u8,
     pub entries: *mut [MemPoolEntry; CONFIG.max_entry_num],
 }
 
@@ -206,7 +206,7 @@ impl MemPoolDirectory {
             .lock()
             .unwrap()
             .malloc(CONFIG.entry_size * CONFIG.max_entry_num);
-        let gd_pointer = memory_manager.lock().unwrap().malloc(CONFIG.ptr_size);
+        let gd_pointer = memory_manager.lock().unwrap().malloc(size_of::<u8>());
         unsafe {
             (*(vec_pointer as *mut [MemPoolEntry; CONFIG.max_entry_num]))[0].init(
                 memory_manager.clone(),
@@ -220,7 +220,7 @@ impl MemPoolDirectory {
             );
             *(gd_pointer as *mut usize) = 1;
             MemPoolDirectory {
-                global_depth: gd_pointer as *mut usize,
+                global_depth: gd_pointer as *mut u8,
                 entries: vec_pointer as *mut [MemPoolEntry; CONFIG.max_entry_num],
             }
         }
@@ -263,24 +263,13 @@ impl MemPoolDirectory {
         unsafe { &mut (*(self.entries))[index] }
     }
 
-    pub fn get_global_depth(&self) -> usize {
-        unsafe {
-            (*(self.global_depth as *mut AtomicU64)).load(std::sync::atomic::Ordering::SeqCst)
-                as usize
-        }
+    pub fn get_global_depth(&self) -> u8 {
+        unsafe { (*(self.global_depth as *mut AtomicU8)).load(std::sync::atomic::Ordering::SeqCst) }
     }
 
-    pub fn atomic_add_global_depth(&self, add: usize) -> bool {
+    pub fn atomic_add_global_depth(&self, add: u8) {
         unsafe {
-            match (*(self.global_depth as *mut AtomicU64)).compare_exchange(
-                self.get_global_depth() as u64,
-                (self.get_global_depth() + add) as u64,
-                atomic::Ordering::SeqCst,
-                atomic::Ordering::SeqCst,
-            ) {
-                Ok(_) => true,
-                Err(_) => false,
-            }
+            *(self.global_depth) += add;
         }
     }
 

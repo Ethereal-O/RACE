@@ -35,6 +35,13 @@ impl MemPool {
         KVBlockMem::new(&key, &value, self.memory_manager.clone())
     }
 
+    pub fn free_kv(&self, kv_block: *const KVBlockMem, size: usize) {
+        self.memory_manager
+            .lock()
+            .unwrap()
+            .free(kv_block as *const u8, size);
+    }
+
     pub fn write_slot(&self, slot_pos: &SlotPos, data: u64, old: u64) -> bool {
         unsafe { (*(slot_pos.subtable as *mut Subtable)).set(slot_pos, data, old) }
     }
@@ -67,11 +74,11 @@ impl MemPool {
         self.dir.set_subtable_header(index, local_depth, suffix);
     }
 
-    pub fn get_global_length(&mut self) -> usize {
+    pub fn get_global_length(&mut self) -> u8 {
         self.dir.get_global_depth()
     }
 
-    pub fn increase_global_depth(&self) -> bool {
+    pub fn increase_global_depth(&self) {
         self.dir.atomic_add_global_depth(1)
     }
 
