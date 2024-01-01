@@ -186,29 +186,49 @@ impl Client {
             self.mempool
                 .read()
                 .unwrap()
-                .free_kv(kv_block, size_of::<KVBlockMem>() + key.len() + val.len());
+                .free_kv(kv_block, unsafe { (*kv_block).get_total_length() });
             false
         }
     }
 
-    // TODO: consider deleting during concurrent resizing
+    fn _delete(&mut self, key: &String, cbs: &[CombinedBucket; 2]) -> bool {
+        let remote_local_depth1 = cbs[0].main_bucket.header.get_local_depth();
+        let remote_suffix1 = cbs[0].main_bucket.header.get_suffix();
+        let suffix1 = RaceUtils::get_suffix(key, remote_local_depth1);
+        let remote_local_depth2 = cbs[1].main_bucket.header.get_local_depth();
+        let remote_suffix2 = cbs[1].main_bucket.header.get_suffix();
+        let suffix2 = RaceUtils::get_suffix(key, remote_local_depth2);
+
+        // Both local depth and suffix bits mismatch, refresh directory and redo!
+        if remote_suffix1 != suffix1 && remote_suffix2 != suffix2 {
+            self.refresh_directory();
+            return self.delete(key);
+        }
+
+        let mut op_spd = None;
+        for i in 0..2 {
+            op_spd = cbs[i].get_slot_pos_and_data(key, i);
+            if op_spd.is_some() {
+                break;
+            }
+        }
+        if let Some(spd) = op_spd {
+            if self.mempool.read().unwrap().write_slot(&spd.0, 0, spd.1) {
+                true
+            } else {
+                // CAS happens after "moving items" in resizing, refresh and redo!
+                self.refresh_directory();
+                self.delete(key)
+            }
+        } else {
+            // At least suffix bits match, which means the key does not exist, then do nothing!
+            false
+        }
+    }
+
     pub fn delete(&mut self, key: &String) -> bool {
         match self.get_combined_buckets(key) {
-            Some(cbs) => {
-                let mut op_spkp = None;
-                for i in 0..2 {
-                    op_spkp = cbs[i].get_slot_pos_and_data(key, i);
-                    if op_spkp.is_some() {
-                        break;
-                    }
-                }
-                if let Some(spkp) = op_spkp {
-                    self.mempool.read().unwrap().write_slot(&spkp.0, 0, spkp.1);
-                    true
-                } else {
-                    false
-                }
-            }
+            Some(cbs) => self._delete(key, &cbs),
             None => panic!("get candidate position error"),
         }
     }

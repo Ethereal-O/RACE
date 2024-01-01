@@ -9,6 +9,7 @@ use std::{
 
 extern "C" {
     pub fn memcpy(dst: *mut u8, src: *const u8, bytes: usize);
+    pub fn memset(str: *mut u8, c: i32, n: u32);
 }
 
 struct Free {

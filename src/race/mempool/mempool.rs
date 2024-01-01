@@ -1,4 +1,5 @@
 use crate::directory::MemPoolDirectory;
+use crate::numa::mm::memset;
 use crate::race::common::kvblock::KVBlockMem;
 use crate::race::computepool::directory::ClientDirectory;
 use crate::race::mempool::subtable::CombinedBucket;
@@ -36,6 +37,9 @@ impl MemPool {
     }
 
     pub fn free_kv(&self, kv_block: *const KVBlockMem, size: usize) {
+        unsafe {
+            memset(kv_block as *mut u8, 0, size as u32);
+        }
         self.memory_manager
             .lock()
             .unwrap()
