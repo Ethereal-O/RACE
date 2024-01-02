@@ -440,7 +440,7 @@ impl Client {
         self.unlock_all();
     }
 
-    fn move_items(&mut self, old_index: usize) {
+    fn move_items(&mut self, old_index: usize, tmp_new_index: usize) {
         for bucket_group_index in 0..CONFIG.bucket_group_num {
             for bucket_index in 0..CONFIG.bucket_num {
                 for slot_index in 0..CONFIG.slot_num {
@@ -461,8 +461,16 @@ impl Client {
                             RaceUtils::get_suffix(&kv_data.key, self.directory.global_depth as u8)
                                 as usize;
 
-                        if new_index == old_index {
-                            // dont need to move
+                        if self
+                            .get_directory()
+                            .get_entry_const(old_index)
+                            .get_subtable_pointer()
+                            == self
+                                .get_directory()
+                                .get_entry_const(new_index)
+                                .get_subtable_pointer()
+                        {
+                            // don't need to move
                             continue;
                         }
 
@@ -471,6 +479,7 @@ impl Client {
                         let insert_result = self.insert(&kv_data.key, &kv_data.value);
                         if insert_result {
                             // delete old data
+                            // TODO: we must make sure no one has the pointer
                             self.mempool.read().unwrap().write_slot(&slot_pos, 0, data);
                             self.mempool
                                 .read()
@@ -479,10 +488,8 @@ impl Client {
                                     (*(Slot { data }).get_kv_pointer()).get_total_length()
                                 });
                         } else {
-                            // println!(
-                            //     "inserting {} got old_index {} new_index {}",
-                            //     kv_data.key, old_index, new_index
-                            // );
+                            // should not happen
+                            panic!("move items error");
                         }
                     }
                 }
@@ -500,7 +507,7 @@ impl Client {
         let old_size = self.get_size();
 
         if old_size <= new_index {
-            panic!("new_index error");
+            panic!("new_index out of range");
         }
 
         // create new subtable
@@ -570,7 +577,8 @@ impl Client {
 
         // move items from old subtable to new subtable
         // we must not have lock, because if we need double rehash, we will deadlock
-        self.move_items(old_index);
+        // self.move_items(old_index);
+        self.move_items(old_index, new_index);
     }
 
     // only for test
