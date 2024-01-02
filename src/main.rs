@@ -13,6 +13,7 @@ use race::mempool::mempool::MemPool;
 use race::mempool::{directory, subtable::Bucket};
 use std::mem::size_of;
 use std::sync::RwLock;
+use std::vec;
 use std::{
     ops::Deref,
     sync::{Arc, Mutex},
@@ -217,35 +218,38 @@ pub fn test_client() {
 pub fn test_id() {
     let mempool = Arc::new(RwLock::new(MemPool::new()));
     let mut client = Client::new(mempool.clone());
-    for i in 0..100 {
+    let mut vec: Vec<i32> = Vec::new();
+    for i in 0..60000 {
+        let random_v = rand::random::<i32>() % 60000;
+        vec.push(random_v);
         client.insert(
-            &(String::from("key") + &i.to_string()),
-            &(String::from("val") + &i.to_string()),
+            &(String::from("key") + &random_v.to_string()),
+            &(String::from("val") + &random_v.to_string()),
         );
     }
-    let mut i = 0;
-    while i < 100 {
-        client.delete(&(String::from("key") + &i.to_string()));
-        i += 2;
-    }
-    for i in 0..100 {
-        if let Some(v) = client.search(&(String::from("key") + &i.to_string())) {
-            println!("{}", v);
+    // let mut i = 0;
+    // while i < 100 {
+    //     client.delete(&(String::from("key") + &i.to_string()));
+    //     i += 2;
+    // }
+    for i in 0..60000 {
+        if let Some(v) = client.search(&(String::from("key") + &vec[i].to_string())) {
+            assert_eq!(v, String::from("val") + &vec[i].to_string());
         }
     }
-    i = 0;
-    while i < 100 {
-        client.insert(
-            &(String::from("key") + &i.to_string()),
-            &(String::from("val") + &i.to_string()),
-        );
-        i += 2;
-    }
-    for i in 0..100 {
-        if let Some(v) = client.search(&(String::from("key") + &i.to_string())) {
-            println!("{}", v);
-        }
-    }
+    // i = 0;
+    // while i < 100 {
+    //     client.insert(
+    //         &(String::from("key") + &i.to_string()),
+    //         &(String::from("val") + &i.to_string()),
+    //     );
+    //     i += 2;
+    // }
+    // for i in 0..100 {
+    //     if let Some(v) = client.search(&(String::from("key") + &i.to_string())) {
+    //         println!("{}", v);
+    //     }
+    // }
 }
 
 fn main() {

@@ -96,6 +96,28 @@ impl Slot {
     pub fn get_data(&self) -> u64 {
         self.data
     }
+
+    pub fn get_atomic(&self) -> u64 {
+        unsafe {
+            std::mem::transmute::<&u64, &atomic::AtomicU64>(&self.data)
+                .load(atomic::Ordering::SeqCst)
+        }
+    }
+
+    pub fn get_kv(&self) -> Option<KVBlock> {
+        let kv_pointer = self.get_kv_pointer();
+        if kv_pointer == std::ptr::null_mut() {
+            return None;
+        }
+        let kv = unsafe { (*(kv_pointer as *mut KVBlockMem)).get() };
+        return Some(KVBlock {
+            klen: kv.klen,
+            vlen: kv.vlen,
+            key: kv.key,
+            value: kv.value,
+            crc64: kv.crc64,
+        });
+    }
 }
 
 pub struct Header {
@@ -171,6 +193,14 @@ impl Bucket {
 
     pub fn set(&mut self, slot: usize, data: u64, old: u64) -> bool {
         self.slots[slot].compare_and_swap(data, old)
+    }
+
+    pub fn get(&self, slot: usize) -> u64 {
+        self.slots[slot].get_atomic()
+    }
+
+    pub fn get_kv(&self, slot: usize) -> Option<KVBlock> {
+        self.slots[slot].get_kv()
     }
 
     pub fn get_by_key(&self, key: &String, fp: u8) -> Option<KVBlock> {
@@ -280,6 +310,14 @@ impl BucketGroup {
         self.buckets[bucket].set(slot, data, old)
     }
 
+    pub fn get(&self, bucket: usize, slot: usize) -> u64 {
+        self.buckets[bucket].get(slot)
+    }
+
+    pub fn get_kv(&self, bucket: usize, slot: usize) -> Option<KVBlock> {
+        self.buckets[bucket].get_kv(slot)
+    }
+
     pub fn set_header(&mut self, local_depth: u8, suffix: u64) {
         for bucket in self.buckets.iter_mut() {
             bucket.set_header(local_depth, suffix);
@@ -294,6 +332,14 @@ pub struct Subtable {
 impl Subtable {
     pub fn set(&mut self, slot_pos: &SlotPos, data: u64, old: u64) -> bool {
         self.bucket_groups[slot_pos.bucket_group].set(slot_pos.bucket, slot_pos.slot, data, old)
+    }
+
+    pub fn get(&self, slot_pos: &SlotPos) -> u64 {
+        self.bucket_groups[slot_pos.bucket_group].get(slot_pos.bucket, slot_pos.slot)
+    }
+
+    pub fn get_kv(&self, slot_pos: &SlotPos) -> Option<KVBlock> {
+        self.bucket_groups[slot_pos.bucket_group].get_kv(slot_pos.bucket, slot_pos.slot)
     }
 
     pub fn get_by_bucket_group_ids(

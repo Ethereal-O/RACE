@@ -1,6 +1,6 @@
 use crate::directory::MemPoolDirectory;
 use crate::numa::mm::memset;
-use crate::race::common::kvblock::KVBlockMem;
+use crate::race::common::kvblock::{KVBlockMem, KVBlock};
 use crate::race::computepool::directory::ClientDirectory;
 use crate::race::mempool::subtable::CombinedBucket;
 use crate::MemoryManager;
@@ -44,6 +44,14 @@ impl MemPool {
             .lock()
             .unwrap()
             .free(kv_block as *const u8, size);
+    }
+
+    pub fn read_slot(&self, slot_pos: &SlotPos) -> u64 {
+        unsafe { (*(slot_pos.subtable as *mut Subtable)).get(slot_pos) }
+    }
+
+    pub fn read_slot_kv(&self, slot_pos: &SlotPos) -> Option<KVBlock> {
+        unsafe { (*(slot_pos.subtable as *mut Subtable)).get_kv(slot_pos) }
     }
 
     pub fn write_slot(&self, slot_pos: &SlotPos, data: u64, old: u64) -> bool {

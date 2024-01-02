@@ -2,10 +2,11 @@ use super::directory::{self, ClientDirectory};
 use crate::cfg::config::CONFIG;
 use crate::race::common::hash::{Hash, HashMethod};
 use crate::race::common::utils::RaceUtils;
-use crate::race::mempool::subtable::{CombinedBucket, SlotPos};
+use crate::race::mempool::subtable::{CombinedBucket, SlotPos, Subtable};
 use crate::race::mempool::{self, mempool::MemPool};
 use crate::KVBlockMem;
 use std::mem::size_of;
+use std::process::exit;
 use std::sync::{Arc, Mutex, RwLock};
 
 pub struct Client {
@@ -180,6 +181,10 @@ impl Client {
     }
 
     pub fn insert(&mut self, key: &String, val: &String) -> bool {
+        // print!("insert: {} {}\n", key, val);
+        // if key=="key1036"{
+        //     exit(0);
+        // }
         let kv_block = self
             .mempool
             .read()
@@ -196,6 +201,7 @@ impl Client {
         }
     }
 
+    /*TODO: FREE */
     fn _delete(&mut self, key: &String, cbs: &[CombinedBucket; 2]) -> bool {
         let remote_local_depth1 = cbs[0].main_bucket.header.get_local_depth();
         let remote_suffix1 = cbs[0].main_bucket.header.get_suffix();
@@ -438,7 +444,46 @@ impl Client {
         self.unlock_all();
     }
 
-    fn move_items(&mut self, old_index: usize, new_index: usize) {}
+    fn move_items(&mut self, old_index: usize) {
+        print!("now size: {}\n", self.get_size());
+        for bucket_group_index in 0..CONFIG.bucket_group_num {
+            for bucket_index in 0..CONFIG.bucket_num {
+                for slot_index in 0..CONFIG.slot_num {
+                    let slot_pos = SlotPos {
+                        subtable: self.directory.get_entry(old_index).get_subtable_pointer()
+                            as *const Subtable,
+                        bucket_group: bucket_group_index,
+                        bucket: bucket_index,
+                        header: 0,
+                        slot: slot_index,
+                    };
+
+                    // read from this slot
+                    let kv_data_op = self.mempool.read().unwrap().read_slot_kv(&slot_pos);
+
+                    if let Some(kv_data) = kv_data_op {
+                        let new_index =
+                            RaceUtils::get_suffix(&kv_data.key, self.directory.global_depth as u8)
+                                as usize;
+
+                        if new_index == old_index {
+                            // dont need to move
+                            continue;
+                        }
+
+                        let data = self.mempool.read().unwrap().read_slot(&slot_pos);
+                        
+                        // self.insert(&kv_data.key, &kv_data.value);
+                        // print!("rehash insert: {} {}\n", kv_data.key, kv_data.value);
+
+                        // Insert during resizing, delete the wrong insertion and reinsert
+                        // self.mempool.read().unwrap().write_slot(&slot_pos, 0, data);
+                    }
+                }
+            }
+        }
+        print!("done\n");
+    }
 
     fn split_entry(&mut self, old_index: usize) {
         // get old depth from old index
@@ -473,12 +518,14 @@ impl Client {
             old_depth + 1,
             old_index as u64,
         );
-
-        // move items from old subtable to new subtable
-        self.move_items(old_index, new_index);
     }
 
     fn rehash(&mut self, rehash_index: usize) {
+        print!(
+            "rehash: {} and tot num: {}\n",
+            rehash_index,
+            self.get_size()
+        );
         // get real old index
         let old_index = RaceUtils::restrict_suffix_to(
             rehash_index as u64,
@@ -491,6 +538,10 @@ impl Client {
         ) as usize;
 
         let old_size = self.get_size();
+        if old_size >= CONFIG.max_entry_num {
+            panic!("rehash error");
+        }
+
         if old_size <= new_index {
             self.double_size();
         }
@@ -516,6 +567,10 @@ impl Client {
         // unlock suffix
         self.unlock_suffix(old_index as u64);
         self.unlock_suffix(new_index as u64);
+
+        // move items from old subtable to new subtable
+        // we must not have lock, because if we need double rehash, we will deadlock
+        self.move_items(old_index);
     }
 
     // only for test
