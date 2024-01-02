@@ -219,8 +219,11 @@ pub fn test_id() {
     let mempool = Arc::new(RwLock::new(MemPool::new()));
     let mut client = Client::new(mempool.clone());
     let mut vec: Vec<i32> = Vec::new();
-    for i in 0..60000 {
-        let random_v = rand::random::<i32>() % 60000;
+    for i in 0..600000 {
+        if i % 100000 == 0 {
+            println!("Insert: {}/600000", i);
+        }
+        let random_v = i;
         vec.push(random_v);
         client.insert(
             &(String::from("key") + &random_v.to_string()),
@@ -232,7 +235,10 @@ pub fn test_id() {
     //     client.delete(&(String::from("key") + &i.to_string()));
     //     i += 2;
     // }
-    for i in 0..60000 {
+    for i in 0..600000 {
+        if i % 100000 == 0 {
+            println!("Search: {}/600000", i);
+        }
         if let Some(v) = client.search(&(String::from("key") + &vec[i].to_string())) {
             assert_eq!(v, String::from("val") + &vec[i].to_string());
         }

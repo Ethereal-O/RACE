@@ -181,10 +181,6 @@ impl Client {
     }
 
     pub fn insert(&mut self, key: &String, val: &String) -> bool {
-        // print!("insert: {} {}\n", key, val);
-        // if key=="key1036"{
-        //     exit(0);
-        // }
         let kv_block = self
             .mempool
             .read()
@@ -445,7 +441,6 @@ impl Client {
     }
 
     fn move_items(&mut self, old_index: usize) {
-        print!("now size: {}\n", self.get_size());
         for bucket_group_index in 0..CONFIG.bucket_group_num {
             for bucket_index in 0..CONFIG.bucket_num {
                 for slot_index in 0..CONFIG.slot_num {
@@ -472,17 +467,16 @@ impl Client {
                         }
 
                         let data = self.mempool.read().unwrap().read_slot(&slot_pos);
-                        
-                        // self.insert(&kv_data.key, &kv_data.value);
+
+                        self.insert(&kv_data.key, &kv_data.value);
                         // print!("rehash insert: {} {}\n", kv_data.key, kv_data.value);
 
                         // Insert during resizing, delete the wrong insertion and reinsert
-                        // self.mempool.read().unwrap().write_slot(&slot_pos, 0, data);
+                        self.mempool.read().unwrap().write_slot(&slot_pos, 0, data);
                     }
                 }
             }
         }
-        print!("done\n");
     }
 
     fn split_entry(&mut self, old_index: usize) {
@@ -521,11 +515,6 @@ impl Client {
     }
 
     fn rehash(&mut self, rehash_index: usize) {
-        print!(
-            "rehash: {} and tot num: {}\n",
-            rehash_index,
-            self.get_size()
-        );
         // get real old index
         let old_index = RaceUtils::restrict_suffix_to(
             rehash_index as u64,

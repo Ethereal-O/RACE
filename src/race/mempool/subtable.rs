@@ -186,6 +186,8 @@ impl Bucket {
         for slot in self.slots.iter() {
             if !slot.judge_empty() {
                 used_slot_num += 1;
+            } else {
+                break;
             }
         }
         used_slot_num
