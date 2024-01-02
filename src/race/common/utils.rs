@@ -2,6 +2,7 @@ use crate::hash::{Hash, HashMethod};
 use crate::race::mempool::subtable::{CombinedBucket, SlotPos};
 use crate::CONFIG;
 use crate::{Bucket, KVBlockMem};
+use crc::{Crc, CRC_64_REDIS};
 use std::mem::size_of;
 
 pub struct RaceUtils {}
@@ -75,5 +76,10 @@ impl RaceUtils {
                 << CONFIG.bits_of_byte
                     * (size_of::<u64>() - size_of::<u8>() - CONFIG.slot_len_offset));
         data
+    }
+
+    pub fn check_crc(key: &String, value: &String, checksum: u64) -> bool {
+        let combined_string = key.clone() + value;
+        checksum == Crc::<u64>::new(&CRC_64_REDIS).checksum(combined_string.as_bytes())
     }
 }

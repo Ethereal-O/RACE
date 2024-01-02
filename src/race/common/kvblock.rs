@@ -48,7 +48,7 @@ impl KVBlockMem {
         kvblock_pointer as *const Self
     }
 
-    pub fn get(&self) -> Option<KVBlock> {
+    pub fn get(&self) -> KVBlock {
         let kl = self.klen;
         let vl = self.vlen;
         let checksum = self.crc64;
@@ -70,16 +70,12 @@ impl KVBlockMem {
             ))
             .to_string()
         };
-        if checksum == Crc::<u64>::new(&CRC_64_REDIS).checksum(value.as_bytes()) {
-            Some(KVBlock {
-                klen: kl,
-                vlen: vl,
-                key,
-                value,
-                crc64: checksum,
-            })
-        } else {
-            None
+        KVBlock {
+            klen: kl,
+            vlen: vl,
+            key,
+            value,
+            crc64: checksum,
         }
     }
 

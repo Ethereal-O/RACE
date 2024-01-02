@@ -7,7 +7,7 @@ use cfg::config::CONFIG;
 use numa::mm::MemoryManager;
 use race::common::kvblock::KVBlockMem;
 use race::computepool::client::Client;
-use race::computepool::directory::ClientDirectory;
+use race::computepool::directory::{ClientDirectory, ClientEntry};
 use race::mempool;
 use race::mempool::mempool::MemPool;
 use race::mempool::{directory, subtable::Bucket};
@@ -214,6 +214,40 @@ pub fn test_client() {
     // 0 1 2 3 4 1 6 3 0 1 10 3 4 1 6 3
 }
 
+pub fn test_id() {
+    let mempool = Arc::new(RwLock::new(MemPool::new()));
+    let mut client = Client::new(mempool.clone());
+    for i in 0..100 {
+        client.insert(
+            &(String::from("key") + &i.to_string()),
+            &(String::from("val") + &i.to_string()),
+        );
+    }
+    let mut i = 0;
+    while i < 100 {
+        client.delete(&(String::from("key") + &i.to_string()));
+        i += 2;
+    }
+    for i in 0..100 {
+        if let Some(v) = client.search(&(String::from("key") + &i.to_string())) {
+            println!("{}", v);
+        }
+    }
+    i = 0;
+    while i < 100 {
+        client.insert(
+            &(String::from("key") + &i.to_string()),
+            &(String::from("val") + &i.to_string()),
+        );
+        i += 2;
+    }
+    for i in 0..100 {
+        if let Some(v) = client.search(&(String::from("key") + &i.to_string())) {
+            println!("{}", v);
+        }
+    }
+}
+
 fn main() {
-    test_client();
+    test_id();
 }

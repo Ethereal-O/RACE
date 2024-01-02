@@ -133,8 +133,13 @@ impl Client {
         let mut result = None;
         for i in 0..2 {
             if let Some(v) = cbs[i].get_by_key(key) {
-                result = Some(v);
-                break;
+                if RaceUtils::check_crc(&v.key, &v.value, v.crc64) {
+                    result = Some(v.value);
+                    break;
+                } else {
+                    // TODO: consider putting current thread to sleep
+                    return self.search(key);
+                }
             }
         }
         if remote_suffix1 == suffix1 && remote_suffix2 == suffix2 {

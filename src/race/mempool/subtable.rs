@@ -2,6 +2,7 @@ use crate::cfg::config::CONFIG;
 use crate::numa::mm::memcpy;
 use crate::numa::mm::MemoryManager;
 use crate::race::common::hash::{Hash, HashMethod};
+use crate::race::common::kvblock::KVBlock;
 use crate::race::common::kvblock::KVBlockMem;
 use std::clone;
 use std::mem::size_of;
@@ -57,17 +58,21 @@ impl Slot {
             as u8
     }
 
-    pub fn get_by_key(&self, key: &String, fp: u8) -> Option<String> {
+    pub fn get_by_key(&self, key: &String, fp: u8) -> Option<KVBlock> {
         if self.get_length() == 0 {
             return None;
         }
         if self.get_fingerprint() == fp {
             let kv_pointer = self.get_kv_pointer();
-            let op_kv = unsafe { (*(kv_pointer as *mut KVBlockMem)).get() };
-            if let Some(kv) = op_kv {
-                if kv.key == *key {
-                    return Some(kv.value);
-                }
+            let kv = unsafe { (*(kv_pointer as *mut KVBlockMem)).get() };
+            if kv.key == *key {
+                return Some(KVBlock {
+                    klen: kv.klen,
+                    vlen: kv.vlen,
+                    key: kv.key,
+                    value: kv.value,
+                    crc64: kv.crc64,
+                });
             }
         }
         return None;
@@ -168,7 +173,7 @@ impl Bucket {
         self.slots[slot].compare_and_swap(data, old)
     }
 
-    pub fn get_by_key(&self, key: &String, fp: u8) -> Option<String> {
+    pub fn get_by_key(&self, key: &String, fp: u8) -> Option<KVBlock> {
         for slot in self.slots.iter() {
             if let Some(v) = slot.get_by_key(key, fp) {
                 return Some(v);
@@ -219,7 +224,7 @@ impl CombinedBucket {
         }
     }
 
-    pub fn get_by_key(&self, key: &String) -> Option<String> {
+    pub fn get_by_key(&self, key: &String) -> Option<KVBlock> {
         let string_to_key = Hash::hash(key, HashMethod::Directory);
         let fp = Hash::hash(key, HashMethod::FingerPrint) as u8;
         match self.main_bucket.get_by_key(key, fp) {
