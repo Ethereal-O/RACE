@@ -2,7 +2,7 @@ use super::directory::{self, ClientDirectory};
 use crate::cfg::config::CONFIG;
 use crate::race::common::hash::{Hash, HashMethod};
 use crate::race::common::utils::RaceUtils;
-use crate::race::mempool::subtable::{CombinedBucket, SlotPos, Subtable};
+use crate::race::mempool::subtable::{CombinedBucket, Slot, SlotPos, Subtable};
 use crate::race::mempool::{self, mempool::MemPool};
 use crate::KVBlockMem;
 use std::mem::size_of;
@@ -468,11 +468,22 @@ impl Client {
 
                         let data = self.mempool.read().unwrap().read_slot(&slot_pos);
 
-                        self.insert(&kv_data.key, &kv_data.value);
-                        // print!("rehash insert: {} {}\n", kv_data.key, kv_data.value);
-
-                        // Insert during resizing, delete the wrong insertion and reinsert
-                        self.mempool.read().unwrap().write_slot(&slot_pos, 0, data);
+                        let insert_result = self.insert(&kv_data.key, &kv_data.value);
+                        if insert_result {
+                            // delete old data
+                            self.mempool.read().unwrap().write_slot(&slot_pos, 0, data);
+                            self.mempool
+                                .read()
+                                .unwrap()
+                                .free_kv((Slot { data }).get_kv_pointer(), unsafe {
+                                    (*(Slot { data }).get_kv_pointer()).get_total_length()
+                                });
+                        } else {
+                            // println!(
+                            //     "inserting {} got old_index {} new_index {}",
+                            //     kv_data.key, old_index, new_index
+                            // );
+                        }
                     }
                 }
             }

@@ -241,6 +241,8 @@ pub fn test_id() {
         }
         if let Some(v) = client.search(&(String::from("key") + &vec[i].to_string())) {
             assert_eq!(v, String::from("val") + &vec[i].to_string());
+        }else{
+            panic!("Search {} Error!", vec[i]);
         }
     }
     // i = 0;
