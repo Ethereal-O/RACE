@@ -123,6 +123,27 @@ impl Client {
         }
     }
 
+    fn update_slot(
+        &mut self,
+        slot_pos: &SlotPos,
+        key: &String,
+        val: &String,
+        kv_block: *const KVBlockMem,
+        old: u64,
+    ) -> bool {
+        let data = RaceUtils::set_data(key, val, kv_block as u64);
+        if self
+            .mempool
+            .read()
+            .unwrap()
+            .write_slot(&slot_pos, data, old)
+        {
+            true
+        } else {
+            self._update(key, val, kv_block)
+        }
+    }
+
     fn _search(&mut self, key: &String, cbs: &[CombinedBucket; 2]) -> Option<String> {
         let remote_local_depth1 = cbs[0].main_bucket.header.get_local_depth();
         let remote_suffix1 = cbs[0].main_bucket.header.get_suffix();
@@ -221,6 +242,12 @@ impl Client {
         }
         if let Some(spd) = op_spd {
             if self.mempool.read().unwrap().write_slot(&spd.0, 0, spd.1) {
+                self.mempool
+                    .read()
+                    .unwrap()
+                    .free_kv((Slot { data: spd.1 }).get_kv_pointer(), unsafe {
+                        (*(Slot { data: spd.1 }).get_kv_pointer()).get_total_length()
+                    });
                 true
             } else {
                 // CAS happens after "moving items" in resizing, refresh and redo!
@@ -237,6 +264,70 @@ impl Client {
         match self.get_combined_buckets(key) {
             Some(cbs) => self._delete(key, &cbs),
             None => panic!("get candidate position error"),
+        }
+    }
+
+    fn _update(&mut self, key: &String, val: &String, kv_block: *const KVBlockMem) -> bool {
+        match self.get_combined_buckets(key) {
+            Some(cbs) => {
+                let remote_local_depth1 = cbs[0].main_bucket.header.get_local_depth();
+                let remote_suffix1 = cbs[0].main_bucket.header.get_suffix();
+                let suffix1 = RaceUtils::get_suffix(key, remote_local_depth1);
+                let remote_local_depth2 = cbs[1].main_bucket.header.get_local_depth();
+                let remote_suffix2 = cbs[1].main_bucket.header.get_suffix();
+                let suffix2 = RaceUtils::get_suffix(key, remote_local_depth2);
+
+                // Both local depth and suffix bits mismatch, refresh directory and redo!
+                if remote_suffix1 != suffix1 && remote_suffix2 != suffix2 {
+                    self.refresh_directory();
+                    return self._update(key, val, kv_block);
+                }
+
+                let mut op_spd = None;
+                for i in 0..2 {
+                    op_spd = cbs[i].get_slot_pos_and_data(key, i);
+                    if op_spd.is_some() {
+                        break;
+                    }
+                }
+
+                if let Some(spd) = op_spd {
+                    if self.update_slot(&spd.0, key, val, kv_block, spd.1) {
+                        self.mempool.read().unwrap().free_kv(
+                            (Slot { data: spd.1 }).get_kv_pointer(),
+                            unsafe {
+                                (*(Slot { data: spd.1 }).get_kv_pointer()).get_total_length()
+                            },
+                        );
+                        true
+                    } else {
+                        // CAS happens after "moving items" in resizing, refresh and redo!
+                        self.refresh_directory();
+                        self._update(key, val, kv_block)
+                    }
+                } else {
+                    // At least suffix bits match, which means the key does not exist, then do nothing!
+                    false
+                }
+            }
+            None => panic!("get candidate postion error"),
+        }
+    }
+
+    pub fn update(&mut self, key: &String, val: &String) -> bool {
+        let kv_block = self
+            .mempool
+            .read()
+            .unwrap()
+            .write_kv(key.clone(), val.clone());
+        if self._update(key, val, kv_block) {
+            true
+        } else {
+            self.mempool
+                .read()
+                .unwrap()
+                .free_kv(kv_block, unsafe { (*kv_block).get_total_length() });
+            false
         }
     }
 
