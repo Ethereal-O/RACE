@@ -218,7 +218,6 @@ impl Client {
         }
     }
 
-    /*TODO: FREE */
     fn _delete(&mut self, key: &String, cbs: &[CombinedBucket; 2]) -> bool {
         let remote_local_depth1 = cbs[0].main_bucket.header.get_local_depth();
         let remote_suffix1 = cbs[0].main_bucket.header.get_suffix();
@@ -228,7 +227,7 @@ impl Client {
         let suffix2 = RaceUtils::get_suffix(key, remote_local_depth2);
 
         // Both local depth and suffix bits mismatch, refresh directory and redo!
-        if remote_suffix1 != suffix1 && remote_suffix2 != suffix2 {
+        if remote_suffix1 != suffix1 || remote_suffix2 != suffix2 {
             self.refresh_directory();
             return self.delete(key);
         }
@@ -278,7 +277,7 @@ impl Client {
                 let suffix2 = RaceUtils::get_suffix(key, remote_local_depth2);
 
                 // Both local depth and suffix bits mismatch, refresh directory and redo!
-                if remote_suffix1 != suffix1 && remote_suffix2 != suffix2 {
+                if remote_suffix1 != suffix1 || remote_suffix2 != suffix2 {
                     self.refresh_directory();
                     return self._update(key, val, kv_block);
                 }
