@@ -1,7 +1,8 @@
 use super::directory::{self, ClientDirectory};
 use crate::cfg::config::CONFIG;
 use crate::race::common::hash::{Hash, HashMethod};
-use crate::race::common::utils::RaceUtils;
+use crate::race::common::kvblock::KVBlock;
+use crate::race::common::utils::{self, RaceUtils};
 use crate::race::mempool::subtable::{CombinedBucket, Slot, SlotPos, Subtable};
 use crate::race::mempool::{self, mempool::MemPool};
 use crate::KVBlockMem;
@@ -367,6 +368,23 @@ impl Client {
     }
 
     fn refresh_directory(&mut self) {
+        loop {
+            self.directory = self.mempool.read().unwrap().get_directory();
+            let mut all_free = true;
+            for index in 0..self.get_size() {
+                if self.directory.get_entry_const(index).check_is_locked() {
+                    all_free = false;
+                    break;
+                }
+            }
+            if all_free {
+                break;
+            }
+        }
+        self.clear_all_lock_status();
+    }
+
+    fn refresh_directory_without_wait(&mut self) {
         self.directory = self.mempool.read().unwrap().get_directory();
         self.clear_all_lock_status();
     }
@@ -394,7 +412,7 @@ impl Client {
                     }
                 }
             }
-            self.refresh_directory();
+            self.refresh_directory_without_wait();
             if is_try && try_times >= CONFIG.max_try_lock_times {
                 return false;
             }
@@ -530,7 +548,28 @@ impl Client {
         self.unlock_all();
     }
 
-    fn move_items(&mut self, old_index: usize, tmp_new_index: usize) {
+    fn read_from_slot_pos_with_crc_check(&mut self, slot_pos: &SlotPos) -> (u64, Option<KVBlock>) {
+        let mut data = self.mempool.read().unwrap().read_slot(&slot_pos);
+        let mut kv_data_op = Slot { data }.get_kv();
+        loop {
+            if let Some(kv_data) = &kv_data_op {
+                if kv_data.klen == 0 {
+                    // there is no data in this slot, we can skip it
+                    return (data, kv_data_op);
+                }
+                if RaceUtils::check_crc(&kv_data.key, &kv_data.value, kv_data.crc64) {
+                    return (data, kv_data_op);
+                }
+            } else {
+                return (data, kv_data_op);
+            }
+            data = self.mempool.read().unwrap().read_slot(&slot_pos);
+            kv_data_op = Slot { data }.get_kv();
+        }
+        return (data, kv_data_op);
+    }
+
+    fn move_items(&mut self, old_index: usize, new_index: usize, local_depth: u8) {
         for bucket_group_index in 0..CONFIG.bucket_group_num {
             for bucket_index in 0..CONFIG.bucket_num {
                 for slot_index in 0..CONFIG.slot_num {
@@ -544,42 +583,129 @@ impl Client {
                     };
 
                     // read from this slot
-                    let kv_data_op = self.mempool.read().unwrap().read_slot_kv(&slot_pos);
+                    let (mut data, mut kv_data_op) = self.read_from_slot_pos_with_crc_check(&slot_pos);
 
-                    if let Some(kv_data) = kv_data_op {
-                        let new_index =
+                    if let Some(kv_data) = &kv_data_op {
+                        if kv_data.klen == 0 {
+                            // there is no data in this slot, we can skip it
+                            continue;
+                        }
+
+                        let hash_key = Hash::hash(&kv_data.key, HashMethod::Directory);
+                        let desired_new_index =
                             RaceUtils::get_suffix(&kv_data.key, self.directory.global_depth as u8)
                                 as usize;
 
                         if self
-                            .get_directory()
-                            .get_entry_const(old_index)
+                            .directory
+                            .get_entry(desired_new_index)
                             .get_subtable_pointer()
-                            == self
-                                .get_directory()
-                                .get_entry_const(new_index)
+                            != self.directory.get_entry(old_index).get_subtable_pointer()
+                            && self
+                                .directory
+                                .get_entry(desired_new_index)
                                 .get_subtable_pointer()
+                                != self.directory.get_entry(new_index).get_subtable_pointer()
+                        {
+                            print!(
+                                "desired_new_index: {}, old_index: {}, new_index: {}, hash_key: {}, key: {}, global_depth: {}",
+                                desired_new_index, old_index, new_index, hash_key, kv_data.key, self.directory.global_depth
+                            );
+                            print!(
+                                "old_pointer: {}, new_pointer: {}, desired_new_pointer: {}",
+                                self.directory.get_entry(old_index).get_subtable_pointer(),
+                                self.directory.get_entry(new_index).get_subtable_pointer(),
+                                self.directory
+                                    .get_entry(desired_new_index)
+                                    .get_subtable_pointer()
+                            );
+                            panic!("move items error")
+                        }
+
+                        if self
+                            .directory
+                            .get_entry(desired_new_index)
+                            .get_subtable_pointer()
+                            != self.directory.get_entry(new_index).get_subtable_pointer()
                         {
                             // don't need to move
                             continue;
                         }
 
-                        let data = self.mempool.read().unwrap().read_slot(&slot_pos);
+                        // insert to new subtable
+                        let new_slot_pos = SlotPos {
+                            subtable: self.directory.get_entry(new_index).get_subtable_pointer()
+                                as *const Subtable,
+                            bucket_group: bucket_group_index,
+                            bucket: bucket_index,
+                            header: 0,
+                            slot: slot_index,
+                        };
+                        let mut new_kv_block = self
+                            .mempool
+                            .read()
+                            .unwrap()
+                            .write_kv(kv_data.key.clone(), kv_data.value.clone());
 
-                        let insert_result = self.insert(&kv_data.key, &kv_data.value);
-                        if insert_result {
-                            // delete old data
-                            // TODO: we must make sure no one has the pointer
-                            self.mempool.read().unwrap().write_slot(&slot_pos, 0, data);
-                            self.mempool
-                                .read()
-                                .unwrap()
-                                .free_kv((Slot { data }).get_kv_pointer(), unsafe {
-                                    (*(Slot { data }).get_kv_pointer()).get_total_length()
-                                });
-                        } else {
-                            // should not happen
-                            panic!("move items error");
+                        let mut new_data =
+                            RaceUtils::set_data(&kv_data.key, &kv_data.value, new_kv_block as u64);
+
+                        self.mempool
+                            .read()
+                            .unwrap()
+                            .write_slot(&new_slot_pos, new_data, 0);
+
+                        // free old data
+                        loop {
+                            let write_res =
+                                self.mempool.read().unwrap().write_slot(&slot_pos, 0, data);
+                            if write_res {
+                                self.mempool.read().unwrap().free_kv(
+                                    (Slot { data }).get_kv_pointer(),
+                                    unsafe {
+                                        (*(Slot { data }).get_kv_pointer()).get_total_length()
+                                    },
+                                );
+                                break;
+                            }
+                            (data, kv_data_op) = self.read_from_slot_pos_with_crc_check(&slot_pos);
+                            if let Some(kv_data) = kv_data_op {
+                                if kv_data.klen == 0 {
+                                    // there is no data in this slot, someone has deleted it
+                                    self.mempool.read().unwrap().write_slot(
+                                        &new_slot_pos,
+                                        0,
+                                        new_data,
+                                    );
+                                    self.mempool.read().unwrap().free_kv(
+                                        (Slot { data: new_data }).get_kv_pointer(),
+                                        unsafe {
+                                            (*(Slot { data: new_data }).get_kv_pointer())
+                                                .get_total_length()
+                                        },
+                                    );
+                                    break;
+                                }
+                                // someone update it
+                                new_kv_block = self
+                                    .mempool
+                                    .read()
+                                    .unwrap()
+                                    .write_kv(kv_data.key.clone(), kv_data.value.clone());
+
+                                new_data = RaceUtils::set_data(
+                                    &kv_data.key,
+                                    &kv_data.value,
+                                    new_kv_block as u64,
+                                );
+
+                                self.mempool
+                                    .read()
+                                    .unwrap()
+                                    .write_slot(&new_slot_pos, new_data, 0);
+                            } else {
+                                panic!("get kv error");
+                            }
                         }
                     }
                 }
@@ -661,14 +787,14 @@ impl Client {
         // split now!
         self.split_entry(old_index);
 
+        // move items from old subtable to new subtable
+        // we must have lock, to prevent other thread from changing the directory
+        // self.move_items(old_index);
+        self.move_items(old_index, new_index, old_depth + 1);
+
         // unlock suffix
         self.unlock_suffix(old_index as u64);
         self.unlock_suffix(new_index as u64);
-
-        // move items from old subtable to new subtable
-        // we must not have lock, because if we need double rehash, we will deadlock
-        // self.move_items(old_index);
-        self.move_items(old_index, new_index);
     }
 
     // only for test

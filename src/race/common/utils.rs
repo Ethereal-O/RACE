@@ -5,6 +5,8 @@ use crate::{Bucket, KVBlockMem};
 use crc::{Crc, CRC_64_REDIS};
 use std::mem::size_of;
 
+use super::kvblock::KVBlock;
+
 pub struct RaceUtils {}
 
 impl RaceUtils {
@@ -42,6 +44,31 @@ impl RaceUtils {
             RaceUtils::add_bit_to_suffix(old_index as u64, old_local_depth + 1),
             old_local_depth + 1,
         )
+    }
+
+    pub fn get_kv_pointer(data: u64) -> *const KVBlockMem {
+        (data
+            & !(0xFF
+                << CONFIG.bits_of_byte
+                    * (size_of::<u64>() - size_of::<u8>() - CONFIG.slot_fp_offset))
+            & !(0xFF
+                << CONFIG.bits_of_byte
+                    * (size_of::<u64>() - size_of::<u8>() - CONFIG.slot_len_offset)))
+            as *const KVBlockMem
+    }
+
+    pub fn get_kvblock_from_pointer(kv_pointer: *const KVBlockMem) -> Option<KVBlock> {
+        if kv_pointer == std::ptr::null_mut() {
+            return None;
+        }
+        let kv = unsafe { (*(kv_pointer as *mut KVBlockMem)).get() };
+        return Some(KVBlock {
+            klen: kv.klen,
+            vlen: kv.vlen,
+            key: kv.key,
+            value: kv.value,
+            crc64: kv.crc64,
+        });
     }
 
     pub fn set_data(key: &String, val: &String, ptr: u64) -> u64 {

@@ -24,6 +24,13 @@ impl ClientEntry {
         self.set_local_depth(local_depth);
     }
 
+    pub fn check_is_locked(&self) -> bool {
+        (self.data
+            >> CONFIG.bits_of_byte
+                * (size_of::<u64>() - size_of::<u8>() - CONFIG.directory_lock_offset))
+            > 0
+    }
+
     pub fn clear_lock_status(&mut self) {
         self.data = (self.data
             & !(0xFF
